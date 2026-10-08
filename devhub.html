@@ -1,0 +1,2265 @@
+<!DOCTYPE html>
+<html lang="en" class="dark h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"/>
+  <link rel="manifest" href="/manifest.json">
+  <title>DevHub Studio - Interactive Resource Workbench</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: { extend: { colors: { brand: '#6366f1' } } }
+    }
+  </script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.5/firebase-firestore-compat.js"></script>
+  <style>
+    .is-resizing { user-select: none !important; cursor: col-resize !important; }
+    .is-resizing iframe { pointer-events: none !important; }
+    .css-fullscreen {
+      position: fixed !important;
+      top: 0 !important;
+      left: 0 !important;
+      width: 100vw !important;
+      height: 100vh !important;
+      z-index: 99999 !important;
+    }
+    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+    .custom-scrollbar::-webkit-scrollbar-track { background: var(--bg-scrollbar-track, #0f172a); }
+    .custom-scrollbar::-webkit-scrollbar-thumb { background: var(--bg-scrollbar-thumb, #334155); border-radius: 4px; }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--bg-scrollbar-thumb-hover, #475569); }
+
+    /* Mobile Backdrop Overlay */
+    #sidebarOverlay {
+      display: none;
+    }
+
+    /* Theme Variable Definitions */
+    .theme-slate {
+      --bg-main: #020617;
+      --bg-surface: #0f172a;
+      --bg-card: #1e293b;
+      --border-color: #334155;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --bg-scrollbar-track: #0f172a;
+      --bg-scrollbar-thumb: #334155;
+      --bg-scrollbar-thumb-hover: #475569;
+    }
+    .theme-oled {
+      --bg-main: #000000;
+      --bg-surface: #09090b;
+      --bg-card: #18181b;
+      --border-color: #27272a;
+      --text-main: #fafafa;
+      --text-muted: #a1a1aa;
+      --bg-scrollbar-track: #09090b;
+      --bg-scrollbar-thumb: #27272a;
+      --bg-scrollbar-thumb-hover: #3f3f46;
+    }
+    .theme-neon {
+      --bg-main: #0d0221;
+      --bg-surface: #150535;
+      --bg-card: #240a54;
+      --border-color: #3b1285;
+      --text-main: #f5f3ff;
+      --text-muted: #c4b5fd;
+      --bg-scrollbar-track: #150535;
+      --bg-scrollbar-thumb: #3b1285;
+      --bg-scrollbar-thumb-hover: #5b21b6;
+    }
+    .theme-light {
+      --bg-main: #f8fafc;
+      --bg-surface: #ffffff;
+      --bg-card: #f1f5f9;
+      --border-color: #e2e8f0;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --bg-scrollbar-track: #f1f5f9;
+      --bg-scrollbar-thumb: #cbd5e1;
+      --bg-scrollbar-thumb-hover: #94a3b8;
+    }
+
+    body {
+      background-color: var(--bg-main);
+      color: var(--text-main);
+    }
+    .app-surface { background-color: var(--bg-surface); }
+    .app-card { background-color: var(--bg-card); }
+    .app-border { border-color: var(--border-color); }
+    .app-text-muted { color: var(--text-muted); }
+
+    /* Desktop Collapsed Sidebar Rail Styling */
+    @media (min-width: 768px) {
+      .sidebar-collapsed {
+        width: 4.5rem !important;
+      }
+      .sidebar-collapsed .sidebar-text {
+        display: none !important;
+      }
+      .sidebar-collapsed .sidebar-header-details {
+        display: none !important;
+      }
+      .sidebar-collapsed .sidebar-center {
+        justify-content: center !important;
+      }
+    }
+
+    /* Mobile Responsive Sidebar Off-Canvas Transitions */
+    @media (max-width: 767px) {
+      #appSidebar {
+        position: fixed;
+        top: 0;
+        bottom: 0;
+        left: 0;
+        transform: translateX(-100%);
+        transition: transform 0.3s ease-in-out;
+        width: 16rem !important;
+      }
+      #appSidebar.mobile-open {
+        transform: translateX(0);
+      }
+      #sidebarOverlay.mobile-open {
+        display: block;
+      }
+    }
+  </style>
+</head>
+<body class="theme-slate h-full flex flex-col md:flex-row font-sans antialiased overflow-hidden">
+
+  <!-- MOBILE BACKDROP OVERLAY -->
+  <div id="sidebarOverlay" onclick="closeMobileSidebar()" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-30"></div>
+
+  <!-- EXPANDABLE SIDEBAR -->
+  <aside id="appSidebar" class="w-64 app-surface border-r app-border p-3 flex flex-col justify-between flex-shrink-0 z-40 h-full">
+    <div class="space-y-4">
+      
+      <!-- BRANDING ICON ACTS AS TOGGLE BUTTON -->
+      <div class="flex items-center justify-between md:justify-start space-x-3 px-1 py-1 sidebar-center">
+        <div class="flex items-center space-x-3">
+          <button onclick="toggleSidebarRail()" class="bg-indigo-600 hover:bg-indigo-500 text-white p-2.5 rounded-xl shadow-lg shadow-indigo-600/30 flex-shrink-0 transition" title="Toggle Sidebar">
+            <i data-lucide="layers" class="w-5 h-5"></i>
+          </button>
+          <div class="sidebar-header-details truncate">
+            <h1 class="text-base font-bold bg-gradient-to-r from-indigo-400 to-cyan-400 bg-clip-text text-transparent truncate">DevHub Studio</h1>
+            <p class="text-[10px] app-text-muted font-medium truncate">Workbench Assistant</p>
+          </div>
+        </div>
+        <!-- Mobile Close Button -->
+        <button onclick="closeMobileSidebar()" class="md:hidden p-1.5 app-text-muted hover:text-white">
+          <i data-lucide="x" class="w-5 h-5"></i>
+        </button>
+      </div>
+
+      <div class="border-t app-border my-2"></div>
+
+      <div class="text-[10px] font-bold app-text-muted uppercase tracking-wider px-2 sidebar-text">Navigation</div>
+      <nav class="space-y-1.5">
+        <button id="tab-reading" onclick="switchMainTab('reading')" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition bg-indigo-600 text-white shadow-md sidebar-center" title="Reading Queue">
+          <i data-lucide="bookmark" class="w-4 h-4 flex-shrink-0"></i>
+          <span class="sidebar-text truncate">Reading Queue</span>
+        </button>
+        <button id="tab-resources" onclick="switchMainTab('resources')" class="w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition app-text-muted hover:text-white hover:bg-slate-800 sidebar-center" title="Developer Tools">
+          <i data-lucide="wrench" class="w-4 h-4 flex-shrink-0"></i>
+          <span class="sidebar-text truncate">Developer Tools</span>
+        </button>
+      </nav>
+    </div>
+
+    <!-- FOOTER CONTAINER -->
+    <div class="space-y-2">
+      <div class="p-3 app-card border app-border rounded-xl space-y-1 text-center">
+        <p class="text-[11px] font-bold text-indigo-400" id="userDisplayName">Dev User</p>
+        <p class="text-[10px] app-text-muted sidebar-text">DevHub Studio v6</p>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN WRAPPER FOR RIGHT-HAND CONTENT -->
+  <div class="flex-1 flex flex-col h-full overflow-hidden w-full">
+
+    <!-- TOP BAR HEADER -->
+    <header class="flex-shrink-0 app-surface border-b app-border z-30">
+      <div class="w-full px-3 sm:px-4 py-2.5 flex flex-wrap items-center justify-between gap-2.5 sm:gap-4">
+        
+        <div class="flex items-center gap-2.5">
+          <!-- Mobile Hamburger Toggle Button -->
+          <button onclick="openMobileSidebar()" class="md:hidden p-2 app-card border app-border rounded-lg text-slate-300 hover:text-white">
+            <i data-lucide="menu" class="w-4 h-4"></i>
+          </button>
+
+          <!-- MULTI-ENVIRONMENT / WORKSPACE SELECTOR -->
+          <div class="flex items-center bg-slate-800/80 p-1 rounded-xl border border-slate-700/80">
+            <span class="text-[10px] uppercase font-bold text-slate-400 px-1.5 sm:px-2 flex items-center gap-1">
+              <i data-lucide="briefcase" class="w-3 h-3 text-indigo-400"></i> <span class="hidden sm:inline">Env:</span>
+            </span>
+            <select id="workspaceSelector" onchange="switchWorkspace(this.value)" class="bg-slate-900 border border-slate-700 text-indigo-300 text-xs font-semibold rounded-lg px-2 py-1 outline-none focus:ring-1 focus:ring-indigo-500 max-w-[120px] sm:max-w-none">
+            </select>
+          </div>
+        </div>
+
+        <div class="flex items-center gap-1.5 sm:gap-2.5">
+          <div class="relative w-32 sm:w-60">
+            <i data-lucide="search" class="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 app-text-muted"></i>
+            <input type="text" id="globalSearch" oninput="renderApp()" placeholder="Search..." class="w-full pl-7 sm:pl-8 pr-2.5 py-1.5 app-card border app-border rounded-lg text-xs focus:outline-none focus:ring-2 focus:ring-indigo-500 placeholder:text-slate-500">
+          </div>
+
+          <button onclick="openCategoryModal()" class="p-1.5 sm:p-2 app-text-muted hover:text-white app-card rounded-lg border app-border transition" title="Manage Custom Categories">
+            <i data-lucide="folder-plus" class="w-4 h-4"></i>
+          </button>
+          <button onclick="exportBackup()" class="p-1.5 sm:p-2 app-text-muted hover:text-white app-card rounded-lg border app-border transition" title="Export Backup JSON">
+            <i data-lucide="download" class="w-4 h-4"></i>
+          </button>
+          <button onclick="document.getElementById('importFile').click()" class="p-1.5 sm:p-2 app-text-muted hover:text-white app-card rounded-lg border app-border transition" title="Import Backup JSON">
+            <i data-lucide="upload" class="w-4 h-4"></i>
+          </button>
+          <input type="file" id="importFile" accept=".json" class="hidden" onchange="importBackup(event)">
+
+          <button onclick="openSettingsModal()" class="p-1.5 sm:p-2 app-text-muted hover:text-white app-card rounded-lg border app-border transition" title="User Settings, Firebase & Themes">
+            <i data-lucide="settings" class="w-4 h-4"></i>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- PINNED & RECENTLY VISITED TOP BAR -->
+    <section class="flex-shrink-0 app-surface border-b app-border px-3 sm:px-4 py-2">
+      <div class="w-full space-y-1.5 text-xs">
+        <div class="flex items-center gap-2 sm:gap-3">
+          <span class="text-[10px] font-bold uppercase app-text-muted tracking-wider w-16 sm:w-20 flex-shrink-0 flex items-center gap-1">
+            <i data-lucide="pin" class="w-3.5 h-3.5 text-amber-400 fill-amber-400"></i> Pinned:
+          </span>
+          <div id="pinnedBar" class="flex items-center gap-1.5 flex-wrap flex-1 overflow-x-auto custom-scrollbar"></div>
+        </div>
+        <div class="border-t app-border"></div>
+        <div class="flex items-center justify-between gap-2 sm:gap-3">
+          <div class="flex items-center gap-2 sm:gap-3 flex-1 overflow-hidden">
+            <span class="text-[10px] font-bold uppercase app-text-muted tracking-wider w-16 sm:w-20 flex-shrink-0 flex items-center gap-1">
+              <i data-lucide="history" class="w-3.5 h-3.5 text-cyan-400"></i> Recent:
+            </span>
+            <div id="recentBar" class="flex items-center gap-1.5 flex-wrap flex-1 overflow-x-auto custom-scrollbar"></div>
+          </div>
+          <button onclick="clearRecentHistory()" class="text-[10px] app-text-muted hover:text-red-400 flex items-center gap-1 flex-shrink-0">
+            <i data-lucide="trash-2" class="w-3 h-3"></i> <span class="hidden sm:inline">Clear Recent</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- MAIN SCROLLABLE CONTENT AREA -->
+    <main class="flex-1 p-3 sm:p-6 overflow-y-auto custom-scrollbar">
+      <div class="max-w-7xl mx-auto space-y-4 sm:space-y-6">
+
+        <!-- SECTION 1: READING & MEDIA QUEUE -->
+        <section id="view-reading" class="space-y-4 sm:space-y-6">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 app-surface p-3 sm:p-4 rounded-xl border app-border">
+            <div class="flex items-center justify-between md:justify-start gap-2 w-full md:w-auto">
+              <div class="flex items-center gap-2">
+                <button id="btn-queue" onclick="setReadingSubTab('queue')" class="px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm">
+                  Unread (<span id="count-queue">0</span>)
+                </button>
+                <button id="btn-vault" onclick="setReadingSubTab('vault')" class="px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-slate-800 text-slate-400 hover:text-slate-200">
+                  Vault (<span id="count-vault">0</span>)
+                </button>
+              </div>
+
+              <button onclick="openAddModal('reading')" class="md:hidden flex items-center gap-1 bg-indigo-600 text-white px-2.5 py-1.5 rounded-lg text-xs font-semibold">
+                <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add
+              </button>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between md:justify-end gap-2.5 w-full md:w-auto">
+              <button onclick="openAddModal('reading')" class="hidden md:flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition">
+                <i data-lucide="plus" class="w-4 h-4"></i> Add Queue Item
+              </button>
+
+              <div class="flex items-center app-card p-1 rounded-lg border app-border">
+                <button id="readingModeListBtn" onclick="setReadingDisplayMode('list')" class="px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white flex items-center gap-1">
+                  <i data-lucide="list" class="w-3.5 h-3.5"></i> <span class="hidden sm:inline">List View</span>
+                </button>
+                <button id="readingModeGroupedBtn" onclick="setReadingDisplayMode('grouped')" class="px-2 py-1 text-xs font-medium rounded transition text-slate-400 hover:text-white flex items-center gap-1">
+                  <i data-lucide="folder" class="w-3.5 h-3.5"></i> <span class="hidden sm:inline">Grouped View</span>
+                </button>
+              </div>
+
+              <div id="readingTypeFilterWrapper" class="flex items-center gap-1.5">
+                <label class="text-xs app-text-muted font-medium hidden sm:inline">Type:</label>
+                <select id="mediaFilter" onchange="renderApp()" class="app-card border app-border text-xs rounded-lg px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500">
+                  <option value="all">All Content Types</option>
+                  <option value="youtube">YouTube Videos</option>
+                  <option value="linkedin">LinkedIn Posts</option>
+                  <option value="article">Articles & Blogs</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Group Header for Reading -->
+          <div id="readingActiveGroupHeader" class="hidden flex-wrap items-center justify-between bg-indigo-950/40 border border-indigo-800/50 p-3.5 rounded-xl gap-2">
+            <div class="flex items-center gap-2.5">
+              <span class="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg"><i data-lucide="folder-open" class="w-4 h-4"></i></span>
+              <div>
+                <h3 id="readingActiveGroupName" class="text-sm font-bold">Type Container</h3>
+                <p id="readingActiveGroupMeta" class="text-xs text-indigo-300/80">0 items inside</p>
+              </div>
+            </div>
+            <button onclick="clearSelectedReadingGroup()" class="px-3 py-1.5 app-card hover:bg-slate-700 text-xs rounded-lg font-medium border app-border flex items-center gap-1.5">
+              <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Back to Grouped
+            </button>
+          </div>
+
+          <div id="mediaContainer" class="space-y-4"></div>
+        </section>
+
+        <!-- SECTION 2: DEVELOPER RESOURCES & TOOLS -->
+        <section id="view-resources" class="space-y-4 sm:space-y-6 hidden">
+          <div class="flex flex-col md:flex-row md:items-center justify-between gap-3 app-surface p-3 sm:p-4 rounded-xl border app-border">
+            <div>
+              <h2 class="text-sm font-bold">Developer Tools & Interactive Sandboxes</h2>
+              <p class="text-xs app-text-muted hidden sm:block">Launch live environments, API docs, and playgrounds into split view panels.</p>
+            </div>
+
+            <div class="flex flex-wrap items-center justify-between md:justify-end gap-2.5">
+              <button onclick="openAddModal('resources')" class="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white px-3 py-1.5 rounded-lg text-xs font-semibold shadow-md transition">
+                <i data-lucide="plus" class="w-4 h-4"></i> <span class="hidden sm:inline">Add Developer Tool</span><span class="sm:hidden">Add Tool</span>
+              </button>
+
+              <div class="flex items-center app-card p-1 rounded-lg border app-border">
+                <button id="viewModeGridBtn" onclick="setResourceDisplayMode('grid')" class="px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white flex items-center gap-1">
+                  <i data-lucide="grid" class="w-3.5 h-3.5"></i> <span class="hidden sm:inline">Grid View</span>
+                </button>
+                <button id="viewModeGroupedBtn" onclick="setResourceDisplayMode('grouped')" class="px-2 py-1 text-xs font-medium rounded transition text-slate-400 hover:text-white flex items-center gap-1">
+                  <i data-lucide="folder" class="w-3.5 h-3.5"></i> <span class="hidden sm:inline">Grouped View</span>
+                </button>
+              </div>
+
+              <!-- Fixed Category Filter Wrapper Dropdown -->
+              <div id="categoryFilterWrapper" class="flex items-center gap-1.5">
+                <label class="text-xs app-text-muted font-medium hidden sm:inline">Category:</label>
+                <select id="resourceCategoryFilter" onchange="renderApp()" class="app-card border app-border text-xs rounded-lg px-2.5 py-1.5 outline-none focus:ring-1 focus:ring-indigo-500 max-w-[130px] sm:max-w-none">
+                  <option value="all">All Categories</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- Active Group Header for Tools -->
+          <div id="activeGroupHeader" class="hidden flex-wrap items-center justify-between bg-indigo-950/40 border border-indigo-800/50 p-3.5 rounded-xl gap-2">
+            <div class="flex items-center gap-2.5">
+              <span class="p-2 bg-indigo-600/20 text-indigo-400 rounded-lg"><i data-lucide="folder-open" class="w-4 h-4"></i></span>
+              <div>
+                <h3 id="activeGroupName" class="text-sm font-bold">Category Name</h3>
+                <p id="activeGroupMeta" class="text-xs text-indigo-300/80">0 Tools inside</p>
+              </div>
+            </div>
+            <button onclick="clearSelectedGroupContainer()" class="px-3 py-1.5 app-card hover:bg-slate-700 text-xs rounded-lg font-medium border app-border flex items-center gap-1.5">
+              <i data-lucide="arrow-left" class="w-3.5 h-3.5"></i> Back to Grouped
+            </button>
+          </div>
+
+          <div id="resourcesGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5"></div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- INTERACTIVE SPLIT WORKSPACE OVERLAY -->
+  <div id="workspaceOverlay" class="fixed inset-0 z-50 bg-slate-950 flex flex-col hidden">
+    <div class="bg-slate-900 border-b border-slate-800 px-3 sm:px-4 py-2 flex flex-wrap items-center justify-between gap-2.5">
+      <div class="flex items-center gap-2 sm:gap-3">
+        <span class="flex items-center gap-1.5 text-xs font-bold text-indigo-400">
+          <i data-lucide="layout" class="w-4 h-4"></i> <span class="hidden sm:inline">Interactive Split Workspace</span>
+        </span>
+        <span class="text-slate-700 hidden sm:inline">|</span>
+        <div class="flex items-center bg-slate-800 p-1 rounded-lg border border-slate-700">
+          <button id="modeSingleBtn" onclick="setPanelLayout('single')" class="px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white">Single</button>
+          <button id="modeDualBtn" onclick="setPanelLayout('dual')" class="px-2 py-1 text-xs font-medium rounded transition text-slate-400 hover:text-white">Dual</button>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1.5">
+          <span class="text-xs text-slate-400 font-medium hidden sm:inline">Left:</span>
+          <select id="leftResourceSelect" onchange="loadResourceInPane('left', this.value)" class="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1 outline-none max-w-[120px] sm:max-w-[180px] truncate"></select>
+        </div>
+
+        <div id="rightResourceWrapper" class="flex items-center gap-1.5 hidden">
+          <span class="text-xs text-slate-400 font-medium hidden sm:inline">Right:</span>
+          <select id="rightResourceSelect" onchange="loadResourceInPane('right', this.value)" class="bg-slate-800 border border-slate-700 text-slate-200 text-xs rounded px-2 py-1 outline-none max-w-[120px] sm:max-w-[180px] truncate"></select>
+        </div>
+
+        <button onclick="toggleFullScreenWorkspace()" class="p-1.5 text-slate-400 hover:text-white bg-slate-800 hover:bg-slate-700 rounded border border-slate-700 transition" title="Toggle Fullscreen">
+          <i data-lucide="maximize-2" class="w-4 h-4"></i>
+        </button>
+
+        <button onclick="closeWorkspaceOverlay()" class="bg-red-950/50 hover:bg-red-900/80 text-red-300 border border-red-800/60 px-2.5 py-1 rounded text-xs flex items-center gap-1 transition">
+          <i data-lucide="x" class="w-4 h-4"></i>
+        </button>
+      </div>
+    </div>
+
+    <div id="workspacePanesArea" class="flex-1 flex flex-col md:flex-row p-2 bg-slate-950 overflow-hidden w-full h-full relative">
+      <div id="leftPaneContainer" class="flex flex-col bg-slate-900 rounded-lg border border-slate-800 overflow-hidden relative h-full w-full">
+        <div class="bg-slate-800/80 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs">
+          <span id="leftPaneTitle" class="font-semibold text-slate-300 truncate">Left View</span>
+          <a id="leftPaneExternal" href="#" target="_blank" class="text-slate-400 hover:text-indigo-400 flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>
+        </div>
+        <div class="flex-1 relative">
+          <iframe id="leftIframe" allow="fullscreen; autoplay; clipboard-write; encrypted-media" class="w-full h-full border-0"></iframe>
+          <div id="leftFallback" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 text-center hidden">
+            <i data-lucide="shield-alert" class="w-10 h-10 text-amber-400 mb-2"></i>
+            <h4 class="font-semibold text-slate-200 mb-1">Embedding Restricted</h4>
+            <p class="text-xs text-slate-400 max-w-sm mb-4">This website prevents iframe embedding via security headers.</p>
+            <a id="leftFallbackBtn" href="#" target="_blank" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded font-medium inline-flex items-center gap-2">
+              Open Site in New Tab <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+
+      <div id="splitterHandle" class="w-full md:w-2 h-2 md:h-full my-0.5 md:my-0 bg-slate-900 hover:bg-indigo-600 active:bg-indigo-500 cursor-row-resize md:cursor-col-resize flex items-center justify-center rounded transition-colors hidden flex-shrink-0 z-10" title="Double click to reset 50:50" ondblclick="applySplitRatio(50)">
+        <div class="h-0.5 md:h-8 w-8 md:w-0.5 bg-slate-700 rounded"></div>
+      </div>
+
+      <div id="rightPaneContainer" class="flex flex-col bg-slate-900 rounded-lg border border-slate-800 overflow-hidden relative h-full hidden">
+        <div class="bg-slate-800/80 px-3 py-1.5 border-b border-slate-800 flex items-center justify-between text-xs">
+          <span id="rightPaneTitle" class="font-semibold text-slate-300 truncate">Right View</span>
+          <a id="rightPaneExternal" href="#" target="_blank" class="text-slate-400 hover:text-indigo-400 flex items-center gap-1"><i data-lucide="external-link" class="w-3.5 h-3.5"></i></a>
+        </div>
+        <div class="flex-1 relative">
+          <iframe id="rightIframe" allow="fullscreen; autoplay; clipboard-write; encrypted-media" class="w-full h-full border-0"></iframe>
+          <div id="rightFallback" class="absolute inset-0 bg-slate-900/95 flex flex-col items-center justify-center p-6 text-center hidden">
+            <i data-lucide="shield-alert" class="w-10 h-10 text-amber-400 mb-2"></i>
+            <h4 class="font-semibold text-slate-200 mb-1">Embedding Restricted</h4>
+            <p class="text-xs text-slate-400 max-w-sm mb-4">This website prevents iframe embedding via security headers.</p>
+            <a id="rightFallbackBtn" href="#" target="_blank" class="bg-indigo-600 hover:bg-indigo-500 text-white text-xs px-4 py-2 rounded font-medium inline-flex items-center gap-2">
+              Open Site in New Tab <i data-lucide="external-link" class="w-3 h-3"></i>
+            </a>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ADD / EDIT ITEM MODAL -->
+  <div id="addModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="app-surface border app-border w-full max-w-md rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div class="flex justify-between items-center border-b pb-3 app-border">
+        <h3 id="modalHeading" class="text-base font-bold">Add New Item</h3>
+        <button onclick="closeAddModal()" class="app-text-muted hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <form id="addForm" onsubmit="handleFormSubmit(event)" class="space-y-3">
+        <input type="hidden" id="editingId" value="">
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">Target Section</label>
+          <select id="modalSection" onchange="adjustModalTypeOptions()" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+            <option value="reading">Reading & Media Queue</option>
+            <option value="resources">Developer Tool / Sandbox</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">Title</label>
+          <input type="text" id="modalTitle" required class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">URL (Optional)</label>
+          <input type="url" id="modalUrl" placeholder="https://example.com (optional)" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold app-text-muted mb-1">Category / Type</label>
+            <select id="modalType" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"></select>
+          </div>
+          <div>
+            <label class="block text-xs font-semibold app-text-muted mb-1">Author / Source</label>
+            <input type="text" id="modalAuthor" placeholder="e.g. Official Docs" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">Tags (comma separated)</label>
+          <input type="text" id="modalTags" placeholder="React, API, DSA" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">Description / Summary</label>
+          <textarea id="modalExcerpt" rows="2" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500"></textarea>
+        </div>
+        <div class="flex items-center gap-2 pt-1">
+          <input type="checkbox" id="modalEmbeddable" checked class="rounded app-card border-slate-700 text-indigo-600 focus:ring-indigo-500">
+          <label for="modalEmbeddable" class="text-xs">Allows iframe embedding</label>
+        </div>
+        <div class="pt-2 flex justify-end gap-2">
+          <button type="button" onclick="closeAddModal()" class="px-3 py-1.5 text-xs app-text-muted hover:text-white">Cancel</button>
+          <button type="submit" class="px-4 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold shadow-md">Save Entry</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- SETTINGS & THEMES MODAL -->
+  <div id="settingsModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="app-surface border app-border w-full max-w-md rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div class="flex justify-between items-center border-b pb-3 app-border">
+        <h3 class="text-base font-bold">User Profile & Settings</h3>
+        <button onclick="closeSettingsModal()" class="app-text-muted hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">Display Name</label>
+          <input type="text" id="settingUserName" onchange="updateProfileName(this.value)" class="w-full app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+        </div>
+
+        <div class="space-y-2 border-t pt-3 app-border">
+          <label class="block text-xs font-semibold app-text-muted">Manage Environments</label>
+          <div class="flex gap-2">
+            <input type="text" id="newEnvName" placeholder="New Env Name..." class="flex-1 app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+            <button onclick="createNewEnvironment()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1">
+              <i data-lucide="plus" class="w-3.5 h-3.5"></i> Add
+            </button>
+          </div>
+          <div id="envManagementList" class="space-y-1.5 mt-2"></div>
+        </div>
+
+        <div class="space-y-3 border-t pt-3 app-border">
+          <div class="flex items-center justify-between gap-3">
+            <div>
+              <label class="block text-xs font-semibold app-text-muted">Cloud Sync & Authentication</label>
+              <p id="firebaseStatusText" class="text-[10px] app-text-muted mt-0.5">Local-only mode</p>
+            </div>
+            <button id="firebaseAuthButton" onclick="toggleGoogleAuth()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg whitespace-nowrap">Sign in with Google</button>
+          </div>
+          <div id="firebaseUserPanel" class="hidden app-card border app-border rounded-xl p-3 text-xs space-y-2">
+            <div class="flex items-center justify-between gap-2">
+              <span id="firebaseUserLabel" class="font-semibold truncate">Not signed in</span>
+              <button onclick="signOutFirebase()" class="text-red-400 hover:text-red-300 font-semibold">Sign out</button>
+            </div>
+            <p class="text-[10px] app-text-muted">Cloud data is scoped to your Firebase Auth user.</p>
+          </div>
+
+          <div class="app-card border app-border rounded-xl p-3 space-y-3">
+            <div class="flex items-center justify-between gap-2">
+              <div>
+                <p class="text-xs font-semibold">Firebase credentials</p>
+                <p class="text-[10px] app-text-muted">Use the app default or your own Firebase project.</p>
+              </div>
+              <span id="firebaseConfigModeBadge" class="text-[9px] px-2 py-1 rounded-full border app-border">Default</span>
+            </div>
+
+            <div class="grid grid-cols-2 gap-2">
+              <label class="text-[10px] app-text-muted">Mode
+                <select id="firebaseConfigMode" onchange="toggleFirebaseConfigMode()" class="mt-1 w-full app-card border app-border rounded-lg p-2 text-xs">
+                  <option value="default">App default</option>
+                  <option value="custom">My Firebase config</option>
+                </select>
+              </label>
+              <div class="text-[10px] app-text-muted flex items-end pb-2">
+                <span>Saved locally in this browser.</span>
+              </div>
+            </div>
+
+            <div id="firebaseConfigFields" class="hidden space-y-2">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <input id="fb_apiKey" placeholder="apiKey" autocomplete="off" class="app-card border app-border rounded-lg p-2 text-xs">
+                <input id="fb_projectId" placeholder="projectId" autocomplete="off" class="app-card border app-border rounded-lg p-2 text-xs">
+                <input id="fb_appId" placeholder="appId" autocomplete="off" class="app-card border app-border rounded-lg p-2 text-xs">
+                <input id="fb_authDomain" placeholder="authDomain" autocomplete="off" class="app-card border app-border rounded-lg p-2 text-xs">
+                <input id="fb_storageBucket" placeholder="storageBucket" autocomplete="off" class="app-card border app-border rounded-lg p-2 text-xs">
+                <input id="fb_messagingSenderId" placeholder="messagingSenderId" autocomplete="off" class="app-card border app-border rounded-lg p-2 text-xs">
+              </div>
+              <p class="text-[10px] app-text-muted leading-relaxed">Firebase web config values are client-side identifiers, not service-account secrets. Security still comes from Firebase Auth and Firestore Rules.</p>
+            </div>
+
+            <div class="flex items-center justify-end gap-2">
+              <button onclick="clearCustomFirebaseConfig()" class="px-3 py-1.5 text-xs app-text-muted hover:text-white">Clear custom config</button>
+              <button onclick="applyFirebaseConfigFromSettings()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold rounded-lg">Apply & Reconnect</button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-2">Workspace Theme Palette</label>
+          <div class="grid grid-cols-2 gap-2.5">
+            <button onclick="applyTheme('theme-slate')" class="p-3 rounded-xl border border-slate-700 bg-slate-900 text-left text-xs font-medium hover:border-indigo-500 flex items-center justify-between">
+              <span>Dark Slate</span>
+              <span class="w-3 h-3 rounded-full bg-slate-900 border border-slate-500"></span>
+            </button>
+            <button onclick="applyTheme('theme-oled')" class="p-3 rounded-xl border border-zinc-800 bg-black text-left text-xs font-medium hover:border-indigo-500 flex items-center justify-between">
+              <span>Midnight OLED</span>
+              <span class="w-3 h-3 rounded-full bg-black border border-zinc-700"></span>
+            </button>
+            <button onclick="applyTheme('theme-neon')" class="p-3 rounded-xl border border-purple-800 bg-purple-950 text-left text-xs font-medium hover:border-indigo-500 flex items-center justify-between">
+              <span>Cyberpunk Neon</span>
+              <span class="w-3 h-3 rounded-full bg-purple-950 border border-purple-500"></span>
+            </button>
+            <button onclick="applyTheme('theme-light')" class="p-3 rounded-xl border border-slate-300 bg-slate-100 text-slate-800 text-left text-xs font-medium hover:border-indigo-500 flex items-center justify-between">
+              <span>Light Clean</span>
+              <span class="w-3 h-3 rounded-full bg-slate-100 border border-slate-400"></span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div class="pt-2 flex justify-end">
+        <button type="button" onclick="closeSettingsModal()" class="px-4 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold shadow-md">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- DELETE CONFIRMATION POPUP -->
+  <div id="deleteEnvConfirmModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="app-surface border border-red-800/60 w-full max-w-sm rounded-2xl p-5 shadow-2xl space-y-4">
+      <div class="flex items-center gap-3 text-red-400">
+        <div class="p-2 bg-red-950/60 rounded-xl border border-red-800/40">
+          <i data-lucide="alert-triangle" class="w-6 h-6"></i>
+        </div>
+        <div>
+          <h3 class="text-sm font-bold text-white">Delete Environment</h3>
+          <p class="text-xs text-red-300">Irreversible Action</p>
+        </div>
+      </div>
+
+      <p class="text-xs app-text-muted leading-relaxed">
+        Are you sure you want to delete environment <strong id="deleteEnvTargetName" class="text-white"></strong>? 
+        This will permanently erase all tools and queue items stored in it.
+      </p>
+
+      <div class="pt-2 flex justify-end gap-2">
+        <button onclick="closeDeleteEnvModal()" class="px-3 py-1.5 text-xs app-card hover:bg-slate-700 rounded-lg">Cancel</button>
+        <button onclick="confirmDeleteEnv()" class="px-4 py-1.5 text-xs bg-red-600 hover:bg-red-500 text-white font-semibold rounded-lg shadow-md">Delete Data</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CATEGORY MANAGEMENT MODAL -->
+  <div id="categoryModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 hidden">
+    <div class="app-surface border app-border w-full max-w-md rounded-2xl p-4 sm:p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto custom-scrollbar">
+      <div class="flex justify-between items-center border-b pb-3 app-border">
+        <h3 class="text-base font-bold">Manage Tool Categories</h3>
+        <button onclick="closeCategoryModal()" class="app-text-muted hover:text-white"><i data-lucide="x" class="w-5 h-5"></i></button>
+      </div>
+      
+      <form onsubmit="handleAddCategory(event)" class="space-y-3">
+        <div>
+          <label class="block text-xs font-semibold app-text-muted mb-1">Add New Category</label>
+          <div class="flex gap-2">
+            <input type="text" id="newCategoryName" required placeholder="e.g. AI Tools, System Design" class="flex-1 app-card border app-border rounded-lg p-2 text-xs focus:ring-2 focus:ring-indigo-500">
+            <button type="submit" class="px-3 py-2 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg font-semibold">Add</button>
+          </div>
+        </div>
+      </form>
+
+      <div class="pt-2 border-t app-border space-y-2">
+        <label class="block text-xs font-semibold app-text-muted">Current Categories</label>
+        <div id="categoryListContainer" class="max-h-48 overflow-y-auto space-y-1.5 custom-scrollbar pr-1"></div>
+      </div>
+
+      <div class="pt-2 flex justify-end">
+        <button type="button" onclick="closeCategoryModal()" class="px-4 py-1.5 text-xs app-card hover:bg-slate-700 rounded-lg">Done</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const STORAGE_KEY = 'DEVHUB_STUDIO_ORGANIZER_MASTER_V7';
+    const FIREBASE_CONFIG_KEY = 'DEVHUB_FIREBASE_CONFIG_V1';
+    const FIREBASE_MODE_KEY = 'DEVHUB_FIREBASE_MODE_V1';
+
+    // Optional deployment-time default:
+    // Deployment example: window.DEVHUB_DEFAULT_FIREBASE_CONFIG = {...}
+    // before this file's Firebase bootstrap runs.
+    const DEFAULT_FIREBASE_CONFIG = window.DEVHUB_DEFAULT_FIREBASE_CONFIG || {
+      apiKey: '',
+      projectId: '',
+      appId: '',
+      authDomain: '',
+      storageBucket: '',
+      messagingSenderId: ''
+    };
+
+    const FIREBASE_CONFIG_FIELDS = ['apiKey', 'projectId', 'appId', 'authDomain', 'storageBucket', 'messagingSenderId'];
+    let firebaseApp = null;
+    let firebaseAuth = null;
+    let firestoreDb = null;
+    let firebaseUser = null;
+    let firebaseUnsubAuth = null;
+    let firebaseUnsubWorkspaces = null;
+    let firebaseUnsubPreferences = null;
+    let firebaseConfig = null;
+    let firebaseMode = localStorage.getItem(FIREBASE_MODE_KEY) || 'default';
+    let firebaseSyncApplying = false;
+    let firebaseSyncReady = false;
+    let firebaseOnline = navigator.onLine;
+    let firebaseLastError = '';
+    let firebaseSyncPromise = null;
+    let firebaseSyncTimer = null;
+
+    function cloneFirebaseConfig(config) {
+      return Object.fromEntries(FIREBASE_CONFIG_FIELDS.map(k => [k, String(config?.[k] || '').trim()]));
+    }
+
+    function isValidFirebaseConfig(config) {
+      return FIREBASE_CONFIG_FIELDS.every(k => !!String(config?.[k] || '').trim());
+    }
+
+    function getStoredFirebaseConfig() {
+      try {
+        const raw = localStorage.getItem(FIREBASE_CONFIG_KEY);
+        return raw ? cloneFirebaseConfig(JSON.parse(raw)) : null;
+      } catch (_) {
+        return null;
+      }
+    }
+
+    function getActiveFirebaseConfig() {
+      return firebaseMode === 'custom' ? getStoredFirebaseConfig() : cloneFirebaseConfig(DEFAULT_FIREBASE_CONFIG);
+    }
+
+    function persistFirebaseSettings(config, mode) {
+      firebaseMode = mode;
+      localStorage.setItem(FIREBASE_MODE_KEY, mode);
+      if (mode === 'custom') {
+        localStorage.setItem(FIREBASE_CONFIG_KEY, JSON.stringify(cloneFirebaseConfig(config)));
+      } else {
+        localStorage.removeItem(FIREBASE_CONFIG_KEY);
+      }
+    }
+
+    function firebaseHasConfig() {
+      return isValidFirebaseConfig(firebaseConfig || getActiveFirebaseConfig());
+    }
+
+    function getFirebaseStatusText() {
+      if (!firebaseHasConfig()) return 'Local-only mode · add a Firebase config to enable cloud sync';
+      if (!firebaseUser) return firebaseOnline ? 'Configured · sign in to enable cloud sync' : 'Configured · offline, using localStorage';
+      if (!firebaseOnline) return `Signed in as ${firebaseUser.email || firebaseUser.displayName || 'Google user'} · offline fallback`;
+      if (firebaseLastError) return `Cloud sync error: ${firebaseLastError}`;
+      return `Cloud sync active · ${firebaseUser.email || firebaseUser.displayName || firebaseUser.uid}`;
+    }
+
+    function updateFirebaseStatusUI() {
+      const status = document.getElementById('firebaseStatusText');
+      const button = document.getElementById('firebaseAuthButton');
+      const panel = document.getElementById('firebaseUserPanel');
+      const label = document.getElementById('firebaseUserLabel');
+      const badge = document.getElementById('firebaseConfigModeBadge');
+      if (!status) return;
+
+      status.textContent = getFirebaseStatusText();
+      status.className = `text-[10px] ${firebaseUser && firebaseOnline && !firebaseLastError ? 'text-emerald-400' : 'app-text-muted'} mt-0.5`;
+
+      if (button) button.textContent = firebaseUser ? 'Account' : 'Sign in with Google';
+      if (panel) panel.classList.toggle('hidden', !firebaseUser);
+      if (label && firebaseUser) label.textContent = firebaseUser.email || firebaseUser.displayName || firebaseUser.uid;
+      if (badge) {
+        badge.textContent = firebaseMode === 'custom' ? 'Custom' : 'Default';
+        badge.className = `text-[9px] px-2 py-1 rounded-full border ${firebaseMode === 'custom' ? 'border-indigo-500/40 text-indigo-300' : 'app-border app-text-muted'}`;
+      }
+    }
+
+    function loadFirebaseSettingsIntoForm() {
+      const config = getStoredFirebaseConfig() || cloneFirebaseConfig(DEFAULT_FIREBASE_CONFIG);
+      document.getElementById('firebaseConfigMode').value = firebaseMode;
+      FIREBASE_CONFIG_FIELDS.forEach(key => {
+        const input = document.getElementById(`fb_${key}`);
+        if (input) input.value = config[key] || '';
+      });
+      toggleFirebaseConfigMode();
+      updateFirebaseStatusUI();
+    }
+
+    function toggleFirebaseConfigMode() {
+      const mode = document.getElementById('firebaseConfigMode').value;
+      const fields = document.getElementById('firebaseConfigFields');
+      const badge = document.getElementById('firebaseConfigModeBadge');
+      if (fields) fields.classList.toggle('hidden', mode !== 'custom');
+      if (badge) {
+        badge.textContent = mode === 'custom' ? 'Custom' : 'Default';
+        badge.className = `text-[9px] px-2 py-1 rounded-full border ${mode === 'custom' ? 'border-indigo-500/40 text-indigo-300' : 'app-border app-text-muted'}`;
+      }
+    }
+
+    function readFirebaseConfigFromForm() {
+      return Object.fromEntries(FIREBASE_CONFIG_FIELDS.map(key => [
+        key,
+        document.getElementById(`fb_${key}`)?.value.trim() || ''
+      ]));
+    }
+
+    async function teardownFirebase({signOut = true} = {}) {
+      if (firebaseUnsubAuth) firebaseUnsubAuth();
+      if (firebaseUnsubWorkspaces) firebaseUnsubWorkspaces();
+      if (firebaseUnsubPreferences) firebaseUnsubPreferences();
+      firebaseUnsubAuth = null;
+      firebaseUnsubWorkspaces = null;
+      firebaseUnsubPreferences = null;
+      firebaseSyncReady = false;
+      if (firebaseSyncTimer) clearTimeout(firebaseSyncTimer);
+      firebaseSyncTimer = null;
+      firebaseSyncPromise = null;
+
+      const oldAuth = firebaseAuth;
+      const oldApp = firebaseApp;
+      firebaseAuth = null;
+      firestoreDb = null;
+      firebaseApp = null;
+      firebaseUser = null;
+
+      if (oldAuth && signOut) {
+        try { await oldAuth.signOut(); } catch (_) {}
+      }
+      if (oldApp) {
+        try { await oldApp.delete(); } catch (_) {}
+      }
+      updateFirebaseStatusUI();
+    }
+
+    async function initializeFirebase(configOverride = null) {
+      const config = cloneFirebaseConfig(configOverride || getActiveFirebaseConfig());
+      firebaseConfig = config;
+      firebaseLastError = '';
+
+      await teardownFirebase({signOut: false});
+
+      if (!isValidFirebaseConfig(config)) {
+        updateFirebaseStatusUI();
+        return false;
+      }
+
+      try {
+        firebaseApp = firebase.initializeApp(config, 'devhub-runtime');
+        firebaseAuth = firebase.auth(firebaseApp);
+        firestoreDb = firebase.firestore(firebaseApp);
+
+        // Firestore's persistent cache gives a second offline layer; localStorage
+        // remains the app-level fallback when Auth is unavailable or connectivity is lost.
+        try {
+          await firestoreDb.enablePersistence({ synchronizeTabs: true });
+        } catch (_) {
+          // Persistence may already be enabled or unavailable in this browser.
+        }
+
+        firebaseUnsubAuth = firebaseAuth.onAuthStateChanged(async user => {
+          firebaseUser = user || null;
+          firebaseLastError = '';
+          updateFirebaseStatusUI();
+          if (firebaseUser && firebaseOnline) {
+            await startFirestoreSync();
+          } else {
+            stopFirestoreSync();
+          }
+        });
+
+        updateFirebaseStatusUI();
+        return true;
+      } catch (error) {
+        firebaseLastError = error?.message || String(error);
+        console.error('Firebase initialization failed:', error);
+        updateFirebaseStatusUI();
+        return false;
+      }
+    }
+
+    async function startFirestoreSync() {
+      if (!firebaseUser || !firestoreDb || !firebaseOnline || firebaseSyncReady) return;
+      const uid = firebaseUser.uid;
+      firebaseSyncReady = true;
+      firebaseLastError = '';
+
+      try {
+        const userRef = firestoreDb.collection('users').doc(uid);
+        const workspacesRef = userRef.collection('workspaces');
+        const preferencesRef = userRef.collection('preferences').doc('app');
+
+        firebaseUnsubWorkspaces = workspacesRef.onSnapshot(snapshot => {
+          firebaseSyncApplying = true;
+          try {
+            const remoteWorkspaces = {};
+            snapshot.forEach(doc => {
+              remoteWorkspaces[doc.id] = doc.data();
+            });
+
+            // An empty cloud account is initialized from the current local state.
+            if (snapshot.empty) {
+              Object.entries(store.workspaces || {}).forEach(([key, workspace]) => {
+                workspacesRef.doc(key).set(workspace, {merge: true}).catch(console.error);
+              });
+            } else {
+              store.workspaces = remoteWorkspaces;
+              if (!store.workspaces[store.activeWorkspace]) {
+                store.activeWorkspace = Object.keys(store.workspaces)[0] || 'personal';
+              }
+              localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+              renderApp();
+            }
+          } finally {
+            firebaseSyncApplying = false;
+          }
+        }, error => {
+          firebaseLastError = error?.message || String(error);
+          firebaseSyncReady = false;
+          updateFirebaseStatusUI();
+        });
+
+        firebaseUnsubPreferences = preferencesRef.onSnapshot(snapshot => {
+          if (!snapshot.exists) return;
+          const remote = snapshot.data() || {};
+          firebaseSyncApplying = true;
+          try {
+            if (remote.theme) store.theme = remote.theme;
+            if (remote.userName) store.userName = remote.userName;
+            if (remote.activeWorkspace && store.workspaces[remote.activeWorkspace]) {
+              store.activeWorkspace = remote.activeWorkspace;
+            }
+            if (typeof remote.sidebarCollapsed === 'boolean') {
+              store.sidebarCollapsed = remote.sidebarCollapsed;
+            }
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+            applyTheme(store.theme);
+            applySidebarRailState();
+            renderApp();
+          } finally {
+            firebaseSyncApplying = false;
+          }
+        }, error => {
+          firebaseLastError = error?.message || String(error);
+          updateFirebaseStatusUI();
+        });
+
+        // Seed preferences only if the document does not exist.
+        const prefSnap = await preferencesRef.get();
+        if (!prefSnap.exists) {
+          await preferencesRef.set({
+            theme: store.theme,
+            userName: store.userName,
+            activeWorkspace: store.activeWorkspace,
+            sidebarCollapsed: !!store.sidebarCollapsed,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge: true});
+        }
+        updateFirebaseStatusUI();
+        await syncStateToFirestore();
+      } catch (error) {
+        firebaseLastError = error?.message || String(error);
+        firebaseSyncReady = false;
+        updateFirebaseStatusUI();
+      }
+    }
+
+    function stopFirestoreSync() {
+      if (firebaseUnsubWorkspaces) firebaseUnsubWorkspaces();
+      if (firebaseUnsubPreferences) firebaseUnsubPreferences();
+      firebaseUnsubWorkspaces = null;
+      firebaseUnsubPreferences = null;
+      firebaseSyncReady = false;
+      updateFirebaseStatusUI();
+    }
+
+    function queueFirestoreSync(delay = 0) {
+      if (firebaseSyncApplying || !firebaseUser || !firestoreDb || !firebaseOnline) return;
+      if (firebaseSyncTimer) clearTimeout(firebaseSyncTimer);
+      firebaseSyncTimer = setTimeout(() => {
+        firebaseSyncTimer = null;
+        syncStateToFirestore().catch(console.error);
+      }, delay);
+    }
+
+    async function syncStateToFirestore() {
+      if (firebaseSyncApplying || !firebaseUser || !firestoreDb || !firebaseOnline) return false;
+      if (firebaseSyncPromise) return firebaseSyncPromise;
+
+      firebaseSyncPromise = (async () => {
+        try {
+          const userRef = firestoreDb.collection('users').doc(firebaseUser.uid);
+
+          // Always create/update a user document first. This makes the authenticated
+          // user's Firestore presence visible immediately in the console.
+          await userRef.set({
+            uid: firebaseUser.uid,
+            email: firebaseUser.email || null,
+            displayName: firebaseUser.displayName || null,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge: true});
+
+          await userRef.collection('preferences').doc('app').set({
+            theme: store.theme,
+            userName: store.userName,
+            activeWorkspace: store.activeWorkspace,
+            sidebarCollapsed: !!store.sidebarCollapsed,
+            updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+          }, {merge: true});
+
+          const workspaceEntries = Object.entries(store.workspaces || {});
+          await Promise.all(workspaceEntries.map(([workspaceId, workspace]) =>
+            userRef.collection('workspaces').doc(workspaceId).set({
+              ...workspace,
+              workspaceId,
+              updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+            }, {merge: true})
+          ));
+
+          firebaseLastError = '';
+          updateFirebaseStatusUI();
+          return true;
+        } catch (error) {
+          firebaseLastError = error?.message || String(error);
+          console.error('Firestore sync failed:', error);
+          updateFirebaseStatusUI();
+          return false;
+        } finally {
+          firebaseSyncPromise = null;
+        }
+      })();
+
+      return firebaseSyncPromise;
+    }
+
+    async function toggleGoogleAuth() {
+      if (!firebaseAuth) {
+        alert('Configure Firebase first, then apply the configuration.');
+        return;
+      }
+      if (firebaseUser) {
+        openSettingsModal();
+        return;
+      }
+      if (!firebaseOnline) {
+        alert('You are offline. LocalStorage fallback is active; sign in when back online.');
+        return;
+      }
+      try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        await firebaseAuth.signInWithPopup(provider);
+      } catch (error) {
+        firebaseLastError = error?.message || String(error);
+        updateFirebaseStatusUI();
+        alert(`Google sign-in failed: ${firebaseLastError}`);
+      }
+    }
+
+    async function signOutFirebase() {
+      if (!firebaseAuth) return;
+      try {
+        await firebaseAuth.signOut();
+        stopFirestoreSync();
+        updateFirebaseStatusUI();
+      } catch (error) {
+        console.error('Firebase sign-out failed:', error);
+      }
+    }
+
+    async function applyFirebaseConfigFromSettings() {
+      const mode = document.getElementById('firebaseConfigMode').value;
+      const config = readFirebaseConfigFromForm();
+
+      if (mode === 'custom' && !isValidFirebaseConfig(config)) {
+        alert('Please fill all six Firebase config fields before applying the custom project.');
+        return;
+      }
+
+      persistFirebaseSettings(config, mode);
+      const ok = await initializeFirebase(mode === 'custom' ? config : DEFAULT_FIREBASE_CONFIG);
+      if (ok) {
+        closeSettingsModal();
+      } else if (mode === 'custom') {
+        alert('Firebase could not be initialized. Check the project config and browser console.');
+      }
+    }
+
+    function clearCustomFirebaseConfig() {
+      persistFirebaseSettings(DEFAULT_FIREBASE_CONFIG, 'default');
+      initializeFirebase(DEFAULT_FIREBASE_CONFIG);
+      loadFirebaseSettingsIntoForm();
+    }
+
+    function handleConnectivityChange() {
+      firebaseOnline = navigator.onLine;
+      if (firebaseOnline && firebaseUser) {
+        firebaseSyncReady = false;
+        startFirestoreSync().catch(console.error);
+      } else if (!firebaseOnline) {
+        stopFirestoreSync();
+      }
+      updateFirebaseStatusUI();
+    }
+
+    window.addEventListener('online', handleConnectivityChange);
+    window.addEventListener('offline', handleConnectivityChange);
+
+    const defaultState = {
+      activeWorkspace: 'personal',
+      theme: 'theme-slate',
+      userName: 'Dev User',
+      sidebarCollapsed: false,
+      workspaces: {
+        personal: {
+          name: 'Personal DevHub',
+          customCategories: ['Documentation', 'Playgrounds', 'DSA Study', 'Utilities', 'API Testing'],
+          recentHistory: [],
+          items: [
+            {
+              id: '1',
+              section: 'resources',
+              title: 'OneCompiler',
+              author: 'OneCompiler',
+              url: 'https://onecompiler.com',
+              type: 'Playgrounds',
+              excerpt: 'Write, run and share code online for over 60+ programming languages.',
+              tags: ['Compiler', 'Sandbox'],
+              status: 'vault',
+              pinned: true,
+              embeddable: true,
+              pdfs: []
+            }
+          ]
+        },
+        office: {
+          name: 'Office DevHub',
+          customCategories: ['Internal Docs', 'Staging Tools', 'API Portals'],
+          recentHistory: [],
+          items: [
+            {
+              id: '101',
+              section: 'resources',
+              title: 'DevDocs.io API Documentation',
+              author: 'DevDocs',
+              url: 'https://devdocs.io',
+              type: 'Internal Docs',
+              excerpt: 'Fast, offline API documentation browser for HTML5, CSS3, JS, React, and Python.',
+              tags: ['Docs', 'Reference'],
+              status: 'vault',
+              pinned: true,
+              embeddable: true,
+              pdfs: []
+            }
+          ]
+        }
+      }
+    };
+
+    let store = JSON.parse(localStorage.getItem(STORAGE_KEY)) || defaultState;
+    if (!store.workspaces) store.workspaces = defaultState.workspaces;
+    if (!store.activeWorkspace || !store.workspaces[store.activeWorkspace]) {
+      store.activeWorkspace = Object.keys(store.workspaces)[0] || 'personal';
+    }
+    if (!store.theme) store.theme = 'theme-slate';
+    if (!store.userName) store.userName = 'Dev User';
+
+    let mainTab = 'reading';
+    let readingSubTab = 'queue';
+    let activeVideoId = null;
+    let layoutMode = 'single';
+    let currentLeftPercentage = 50;
+    let pinnedDropdownOpen = false;
+    let targetDeleteEnvKey = null;
+
+    let resourceDisplayMode = 'grid';
+    let selectedGroupCategory = null;
+
+    let readingDisplayMode = 'list';
+    let selectedReadingType = null;
+
+    function getActiveStore() {
+      return store.workspaces[store.activeWorkspace];
+    }
+
+    function saveState() {
+      // localStorage is always written first so the app remains usable while
+      // signed out, offline, or while Firebase is being reconfigured.
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(store));
+      queueFirestoreSync(50);
+    }
+
+    // MOBILE SIDEBAR CONTROLS
+    function openMobileSidebar() {
+      document.getElementById('appSidebar').classList.add('mobile-open');
+      document.getElementById('sidebarOverlay').classList.add('mobile-open');
+    }
+
+    function closeMobileSidebar() {
+      document.getElementById('appSidebar').classList.remove('mobile-open');
+      document.getElementById('sidebarOverlay').classList.remove('mobile-open');
+    }
+
+    // EXPANDABLE RAIL TOGGLE LOGIC
+    function toggleSidebarRail() {
+      if (window.innerWidth < 768) {
+        closeMobileSidebar();
+      } else {
+        store.sidebarCollapsed = !store.sidebarCollapsed;
+        applySidebarRailState();
+        saveState();
+      }
+    }
+
+    function applySidebarRailState() {
+      const sidebar = document.getElementById('appSidebar');
+      if (store.sidebarCollapsed && window.innerWidth >= 768) {
+        sidebar.classList.add('sidebar-collapsed');
+      } else {
+        sidebar.classList.remove('sidebar-collapsed');
+      }
+      lucide.createIcons();
+    }
+
+    function switchWorkspace(wsKey) {
+      if (store.workspaces[wsKey]) {
+        store.activeWorkspace = wsKey;
+        selectedGroupCategory = null;
+        selectedReadingType = null;
+        saveState();
+        renderApp();
+      }
+    }
+
+    function createNewEnvironment() {
+      const input = document.getElementById('newEnvName');
+      const envName = input.value.trim();
+      if (!envName) return;
+
+      const envKey = 'env_' + Date.now();
+      store.workspaces[envKey] = {
+        name: envName,
+        customCategories: ['Documentation', 'Playgrounds', 'Utilities'],
+        recentHistory: [],
+        items: []
+      };
+      store.activeWorkspace = envKey;
+      input.value = '';
+      saveState();
+      renderSettingsEnvList();
+      renderApp();
+    }
+
+    function promptDeleteEnvironment(envKey) {
+      targetDeleteEnvKey = envKey;
+      const targetEnv = store.workspaces[envKey];
+      document.getElementById('deleteEnvTargetName').innerText = targetEnv ? (targetEnv.name || envKey) : envKey;
+      document.getElementById('deleteEnvConfirmModal').classList.remove('hidden');
+    }
+
+    function closeDeleteEnvModal() {
+      targetDeleteEnvKey = null;
+      document.getElementById('deleteEnvConfirmModal').classList.add('hidden');
+    }
+
+    function confirmDeleteEnv() {
+      if (targetDeleteEnvKey && store.workspaces[targetDeleteEnvKey]) {
+        delete store.workspaces[targetDeleteEnvKey];
+        const remainingKeys = Object.keys(store.workspaces);
+        if (remainingKeys.length === 0) {
+          store.workspaces['personal'] = defaultState.workspaces.personal;
+          store.activeWorkspace = 'personal';
+        } else if (store.activeWorkspace === targetDeleteEnvKey) {
+          store.activeWorkspace = remainingKeys[0];
+        }
+        targetDeleteEnvKey = null;
+        saveState();
+        closeDeleteEnvModal();
+        renderSettingsEnvList();
+        renderApp();
+      }
+    }
+
+    function renderSettingsEnvList() {
+      const container = document.getElementById('envManagementList');
+      const keys = Object.keys(store.workspaces);
+
+      container.innerHTML = keys.map(k => {
+        const env = store.workspaces[k];
+        const isCurrent = k === store.activeWorkspace;
+        return `
+          <div class="flex items-center justify-between app-card px-3 py-1.5 rounded-lg border app-border text-xs">
+            <span class="font-medium ${isCurrent ? 'text-indigo-400 font-bold' : ''}">${env.name || k} ${isCurrent ? '(Active)' : ''}</span>
+            ${keys.length > 1 ? `
+              <button onclick="promptDeleteEnvironment('${k}')" class="app-text-muted hover:text-red-400 p-1" title="Delete Environment">
+                <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+              </button>
+            ` : `<span class="text-[10px] app-text-muted italic">Default</span>`}
+          </div>
+        `;
+      }).join('');
+      lucide.createIcons();
+    }
+
+    function applyTheme(themeName) {
+      store.theme = themeName;
+      document.body.className = `${themeName} h-full flex flex-col md:flex-row font-sans antialiased overflow-hidden`;
+      saveState();
+    }
+
+    function openSettingsModal() {
+      document.getElementById('settingUserName').value = store.userName;
+      renderSettingsEnvList();
+      loadFirebaseSettingsIntoForm();
+      updateFirebaseStatusUI();
+      document.getElementById('settingsModal').classList.remove('hidden');
+      lucide.createIcons();
+    }
+
+    function closeSettingsModal() {
+      document.getElementById('settingsModal').classList.add('hidden');
+    }
+
+    function updateProfileName(name) {
+      store.userName = name.trim() || 'Dev User';
+      document.getElementById('userDisplayName').innerText = store.userName;
+      saveState();
+    }
+
+    function switchMainTab(tab) {
+      mainTab = tab;
+      document.getElementById('view-reading').classList.toggle('hidden', tab !== 'reading');
+      document.getElementById('view-resources').classList.toggle('hidden', tab !== 'resources');
+      
+      document.getElementById('tab-reading').className = tab === 'reading' ? "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition bg-indigo-600 text-white shadow-md sidebar-center" : "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition app-text-muted hover:text-white hover:bg-slate-800 sidebar-center";
+      document.getElementById('tab-resources').className = tab === 'resources' ? "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition bg-indigo-600 text-white shadow-md sidebar-center" : "w-full flex items-center gap-3 px-3.5 py-2.5 rounded-xl text-xs font-semibold transition app-text-muted hover:text-white hover:bg-slate-800 sidebar-center";
+
+      closeMobileSidebar();
+      renderApp();
+    }
+
+    function setReadingSubTab(sub) {
+      readingSubTab = sub;
+      selectedReadingType = null;
+      document.getElementById('btn-queue').className = sub === 'queue' ? "px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm" : "px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg app-card app-text-muted hover:text-slate-200";
+      document.getElementById('btn-vault').className = sub === 'vault' ? "px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg bg-indigo-600 text-white shadow-sm" : "px-2.5 sm:px-3 py-1.5 text-xs font-semibold rounded-lg app-card app-text-muted hover:text-slate-200";
+      renderApp();
+    }
+
+    function setReadingDisplayMode(mode) {
+      readingDisplayMode = mode;
+      selectedReadingType = null;
+      renderApp();
+    }
+
+    function selectReadingGroupContainer(type) {
+      selectedReadingType = type;
+      renderApp();
+    }
+
+    function clearSelectedReadingGroup() {
+      selectedReadingType = null;
+      renderApp();
+    }
+
+    function setResourceDisplayMode(mode) {
+      resourceDisplayMode = mode;
+      selectedGroupCategory = null;
+      renderApp();
+    }
+
+    function selectGroupContainer(catName) {
+      selectedGroupCategory = catName;
+      renderApp();
+    }
+
+    function clearSelectedGroupContainer() {
+      selectedGroupCategory = null;
+      renderApp();
+    }
+
+    function recordRecentAccess(id) {
+      const activeWs = getActiveStore();
+      activeWs.recentHistory = activeWs.recentHistory.filter(itemId => itemId !== id);
+      activeWs.recentHistory.unshift(id);
+      if (activeWs.recentHistory.length > 5) activeWs.recentHistory.pop();
+      saveState();
+      renderApp();
+    }
+
+    function removeRecentItem(id, event) {
+      if (event) event.stopPropagation();
+      const activeWs = getActiveStore();
+      activeWs.recentHistory = activeWs.recentHistory.filter(itemId => itemId !== id);
+      saveState();
+      renderApp();
+    }
+
+    function clearRecentHistory() {
+      const activeWs = getActiveStore();
+      activeWs.recentHistory = [];
+      saveState();
+      renderApp();
+    }
+
+    function togglePin(id, event) {
+      if (event) event.stopPropagation();
+      const activeWs = getActiveStore();
+      activeWs.items = activeWs.items.map(item => item.id === id ? { ...item, pinned: !item.pinned } : item);
+      saveState();
+      renderApp();
+    }
+
+    function togglePinnedDropdown(event) {
+      if (event) event.stopPropagation();
+      pinnedDropdownOpen = !pinnedDropdownOpen;
+      renderApp();
+    }
+
+    document.addEventListener('click', (e) => {
+      if (pinnedDropdownOpen && !e.target.closest('#pinnedBar')) {
+        pinnedDropdownOpen = false;
+        renderApp();
+      }
+    });
+
+    function toggleVaultStatus(id) {
+      const activeWs = getActiveStore();
+      activeWs.items = activeWs.items.map(item => item.id === id ? { ...item, status: item.status === 'queue' ? 'vault' : 'queue' } : item);
+      saveState();
+      renderApp();
+    }
+
+    function extractYouTubeId(url) {
+      if (!url) return null;
+      const match = url.match(/^.*(?:youtu\.be\/|v\/|u\/\w\/|embed\/|watch\?v=|&v=|shorts\/)([^#&?]*).*/);
+      return (match && match[1].length === 11) ? match[1] : null;
+    }
+
+    function toggleVideoPlayer(id) {
+      recordRecentAccess(id);
+      activeVideoId = activeVideoId === id ? null : id;
+      renderApp();
+    }
+
+    function removeItem(id) {
+      if (confirm('Are you sure you want to remove this entry?')) {
+        const activeWs = getActiveStore();
+        activeWs.items = activeWs.items.filter(i => i.id !== id);
+        activeWs.recentHistory = activeWs.recentHistory.filter(i => i !== id);
+        saveState();
+        renderApp();
+      }
+    }
+
+    function handlePdfAttach(id, event) {
+      const file = event.target.files[0];
+      if (file && file.type === 'application/pdf') {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          const pdfDoc = { name: file.name, url: e.target.result, size: (file.size / (1024 * 1024)).toFixed(2) + ' MB' };
+          const activeWs = getActiveStore();
+          activeWs.items = activeWs.items.map(it => it.id === id ? { ...it, pdfs: [...(it.pdfs || []), pdfDoc] } : it);
+          saveState();
+          renderApp();
+        };
+        reader.readAsDataURL(file);
+      }
+    }
+
+    function deletePdf(id, pdfIdx) {
+      const activeWs = getActiveStore();
+      activeWs.items = activeWs.items.map(it => it.id === id ? { ...it, pdfs: it.pdfs.filter((_, i) => i !== pdfIdx) } : it);
+      saveState();
+      renderApp();
+    }
+
+    // CATEGORY MANAGEMENT
+    function openCategoryModal() {
+      renderCategoryModalList();
+      document.getElementById('categoryModal').classList.remove('hidden');
+    }
+    function closeCategoryModal() {
+      document.getElementById('categoryModal').classList.add('hidden');
+      document.getElementById('newCategoryName').value = '';
+    }
+    function handleAddCategory(e) {
+      e.preventDefault();
+      const catName = document.getElementById('newCategoryName').value.trim();
+      const activeWs = getActiveStore();
+      if (catName && !activeWs.customCategories.includes(catName)) {
+        activeWs.customCategories.push(catName);
+        saveState();
+        document.getElementById('newCategoryName').value = '';
+        renderCategoryModalList();
+        renderApp();
+      }
+    }
+    function removeCategory(catName) {
+      if (confirm(`Delete category "${catName}"? Tools assigned to it will revert to "Utilities".`)) {
+        const activeWs = getActiveStore();
+        activeWs.customCategories = activeWs.customCategories.filter(c => c !== catName);
+        activeWs.items = activeWs.items.map(i => i.type === catName ? { ...i, type: 'Utilities' } : i);
+        if (selectedGroupCategory === catName) selectedGroupCategory = null;
+        saveState();
+        renderCategoryModalList();
+        renderApp();
+      }
+    }
+    function renderCategoryModalList() {
+      const container = document.getElementById('categoryListContainer');
+      const activeWs = getActiveStore();
+      if (activeWs.customCategories.length === 0) {
+        container.innerHTML = `<div class="text-xs app-text-muted italic">No custom categories added yet.</div>`;
+        return;
+      }
+      container.innerHTML = activeWs.customCategories.map(cat => `
+        <div class="flex items-center justify-between app-card px-3 py-1.5 rounded-lg border app-border text-xs">
+          <span class="font-medium">${cat}</span>
+          <button onclick="removeCategory('${cat}')" class="app-text-muted hover:text-red-400 p-0.5" title="Remove Category">
+            <i data-lucide="trash-2" class="w-3.5 h-3.5"></i>
+          </button>
+        </div>
+      `).join('');
+      lucide.createIcons();
+    }
+
+    // MODAL ADD / EDIT CONTROLS
+    function openAddModal(targetSection = 'reading', presetType = null, editId = null) {
+      document.getElementById('modalSection').value = targetSection;
+      adjustModalTypeOptions();
+
+      const form = document.getElementById('addForm');
+      const heading = document.getElementById('modalHeading');
+      const editingInput = document.getElementById('editingId');
+
+      if (presetType) {
+        document.getElementById('modalType').value = presetType;
+      }
+
+      if (editId) {
+        const activeWs = getActiveStore();
+        const item = activeWs.items.find(i => i.id === editId);
+        if (!item) return;
+        editingInput.value = item.id;
+        document.getElementById('modalSection').value = item.section;
+        adjustModalTypeOptions();
+        document.getElementById('modalTitle').value = item.title;
+        document.getElementById('modalUrl').value = item.url || '';
+        document.getElementById('modalType').value = item.type;
+        document.getElementById('modalAuthor').value = item.author || '';
+        document.getElementById('modalTags').value = item.tags ? item.tags.join(', ') : '';
+        document.getElementById('modalExcerpt').value = item.excerpt || '';
+        document.getElementById('modalEmbeddable').checked = item.embeddable !== false;
+        heading.innerText = 'Edit Item';
+      } else {
+        form.reset();
+        editingInput.value = '';
+        document.getElementById('modalSection').value = targetSection;
+        adjustModalTypeOptions();
+        if (presetType) document.getElementById('modalType').value = presetType;
+        heading.innerText = targetSection === 'reading' ? 'Add Queue Entry' : 'Add Developer Tool';
+      }
+
+      document.getElementById('addModal').classList.remove('hidden');
+    }
+
+    function closeAddModal() {
+      document.getElementById('addModal').classList.add('hidden');
+      document.getElementById('addForm').reset();
+    }
+
+    function adjustModalTypeOptions() {
+      const sec = document.getElementById('modalSection').value;
+      const select = document.getElementById('modalType');
+      const activeWs = getActiveStore();
+
+      if (sec === 'reading') {
+        select.innerHTML = `
+          <option value="youtube">YouTube Video</option>
+          <option value="linkedin">LinkedIn Post</option>
+          <option value="article">Article / Blog</option>
+        `;
+      } else {
+        select.innerHTML = activeWs.customCategories.map(c => `<option value="${c}">${c}</option>`).join('');
+      }
+    }
+
+    function handleFormSubmit(e) {
+      e.preventDefault();
+      const editingId = document.getElementById('editingId').value;
+      const sec = document.getElementById('modalSection').value;
+      const url = document.getElementById('modalUrl').value.trim();
+      const type = document.getElementById('modalType').value;
+      const activeWs = getActiveStore();
+      
+      const payload = {
+        section: sec,
+        title: document.getElementById('modalTitle').value,
+        url: url,
+        type: type,
+        youtubeId: (type === 'youtube' && url) ? extractYouTubeId(url) : null,
+        author: document.getElementById('modalAuthor').value || 'Unknown',
+        excerpt: document.getElementById('modalExcerpt').value || '',
+        tags: document.getElementById('modalTags').value.split(',').map(t => t.trim()).filter(Boolean),
+        embeddable: document.getElementById('modalEmbeddable').checked
+      };
+
+      if (editingId) {
+        activeWs.items = activeWs.items.map(i => i.id === editingId ? { ...i, ...payload } : i);
+      } else {
+        activeWs.items.unshift({
+          id: Date.now().toString(),
+          ...payload,
+          status: 'queue',
+          pinned: false,
+          pdfs: []
+        });
+      }
+
+      saveState();
+      closeAddModal();
+      renderApp();
+    }
+
+    function exportBackup() {
+      const blob = new Blob([JSON.stringify(store, null, 2)], { type: 'application/json' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `devhub_backup_${new Date().toISOString().slice(0,10)}.json`;
+      a.click();
+    }
+
+    function importBackup(e) {
+      const file = e.target.files[0];
+      if (file) {
+        const reader = new FileReader();
+        reader.onload = function(evt) {
+          try {
+            store = JSON.parse(evt.target.result);
+            saveState();
+            renderApp();
+            alert('Backup restored successfully!');
+          } catch(err) { alert('Invalid backup JSON file.'); }
+        };
+        reader.readAsText(file);
+      }
+    }
+
+    // WORKSPACE OVERLAY & SPLIT PANEL LOGIC
+    function launchInteractiveWorkspace(id) {
+      recordRecentAccess(id);
+      const activeWs = getActiveStore();
+      const resourcesList = activeWs.items.filter(i => i.section === 'resources' && i.url);
+      if (resourcesList.length === 0) {
+        alert('No items with valid URLs available to open in workspace.');
+        return;
+      }
+
+      const leftSelect = document.getElementById('leftResourceSelect');
+      const rightSelect = document.getElementById('rightResourceSelect');
+
+      const optionsHtml = resourcesList.map(r => `<option value="${r.id}">${r.title}</option>`).join('');
+      leftSelect.innerHTML = optionsHtml;
+      rightSelect.innerHTML = optionsHtml;
+
+      leftSelect.value = id;
+      const secondItem = resourcesList.find(r => r.id !== id);
+      rightSelect.value = secondItem ? secondItem.id : id;
+
+      loadResourceInPane('left', leftSelect.value);
+      loadResourceInPane('right', rightSelect.value);
+
+      document.getElementById('workspaceOverlay').classList.remove('hidden');
+    }
+
+    function setPanelLayout(mode) {
+      layoutMode = mode;
+      document.getElementById('rightPaneContainer').classList.toggle('hidden', mode === 'single');
+      document.getElementById('splitterHandle').classList.toggle('hidden', mode === 'single');
+      document.getElementById('rightResourceWrapper').classList.toggle('hidden', mode === 'single');
+      
+      applySplitRatio(currentLeftPercentage);
+
+      document.getElementById('modeSingleBtn').className = mode === 'single' ? "px-2.5 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white" : "px-2.5 py-1 text-xs font-medium rounded transition text-slate-400 hover:text-white";
+      document.getElementById('modeDualBtn').className = mode === 'dual' ? "px-2.5 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white" : "px-2.5 py-1 text-xs font-medium rounded transition text-slate-400 hover:text-white";
+    }
+
+    function applySplitRatio(percentage) {
+      currentLeftPercentage = Math.min(Math.max(percentage, 15), 85);
+      const lPane = document.getElementById('leftPaneContainer');
+      const rPane = document.getElementById('rightPaneContainer');
+      const isMobile = window.innerWidth < 768;
+
+      if (layoutMode === 'single') {
+        lPane.style.width = '100%';
+        lPane.style.height = '100%';
+        rPane.style.width = '0%';
+        rPane.style.height = '0%';
+      } else {
+        if (isMobile) {
+          lPane.style.width = '100%';
+          rPane.style.width = '100%';
+          lPane.style.height = `calc(${currentLeftPercentage}% - 4px)`;
+          rPane.style.height = `calc(${100 - currentLeftPercentage}% - 4px)`;
+        } else {
+          lPane.style.height = '100%';
+          rPane.style.height = '100%';
+          lPane.style.width = `calc(${currentLeftPercentage}% - 4px)`;
+          rPane.style.width = `calc(${100 - currentLeftPercentage}% - 4px)`;
+        }
+      }
+    }
+
+    function loadResourceInPane(side, id) {
+      const activeWs = getActiveStore();
+      const item = activeWs.items.find(i => i.id === id);
+      if (!item) return;
+
+      const iframe = document.getElementById(`${side}Iframe`);
+      const fallback = document.getElementById(`${side}Fallback`);
+      const fallbackBtn = document.getElementById(`${side}FallbackBtn`);
+      
+      document.getElementById(`${side}PaneTitle`).innerText = item.title;
+      document.getElementById(`${side}PaneExternal`).href = item.url || '#';
+      fallbackBtn.href = item.url || '#';
+
+      if (item.embeddable === false || !item.url) {
+        iframe.src = "about:blank";
+        fallback.classList.remove('hidden');
+      } else {
+        fallback.classList.add('hidden');
+        iframe.src = item.url;
+      }
+    }
+
+    function toggleFullScreenWorkspace() {
+      const elem = document.getElementById('workspaceOverlay');
+      if (!document.fullscreenElement) {
+        elem.requestFullscreen().catch(err => elem.classList.toggle('css-fullscreen'));
+      } else {
+        document.exitFullscreen().catch(() => {});
+        elem.classList.remove('css-fullscreen');
+      }
+    }
+
+    function closeWorkspaceOverlay() {
+      if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+      document.getElementById('workspaceOverlay').classList.remove('css-fullscreen');
+      document.getElementById('workspaceOverlay').classList.add('hidden');
+      document.getElementById('leftIframe').src = 'about:blank';
+      document.getElementById('rightIframe').src = 'about:blank';
+    }
+
+    const splitter = document.getElementById('splitterHandle');
+    const workspacePanesArea = document.getElementById('workspacePanesArea');
+    let isDragging = false;
+
+    splitter.addEventListener('mousedown', () => {
+      isDragging = true;
+      document.body.classList.add('is-resizing');
+    });
+    splitter.addEventListener('touchstart', () => {
+      isDragging = true;
+      document.body.classList.add('is-resizing');
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const rect = workspacePanesArea.getBoundingClientRect();
+      const isMobile = window.innerWidth < 768;
+      const ratio = isMobile ? ((e.clientY - rect.top) / rect.height) * 100 : ((e.clientX - rect.left) / rect.width) * 100;
+      applySplitRatio(ratio);
+    });
+    document.addEventListener('touchmove', (e) => {
+      if (!isDragging || !e.touches[0]) return;
+      const rect = workspacePanesArea.getBoundingClientRect();
+      const isMobile = window.innerWidth < 768;
+      const touch = e.touches[0];
+      const ratio = isMobile ? ((touch.clientY - rect.top) / rect.height) * 100 : ((touch.clientX - rect.left) / rect.width) * 100;
+      applySplitRatio(ratio);
+    });
+
+    document.addEventListener('mouseup', () => {
+      if (isDragging) {
+        isDragging = false;
+        document.body.classList.remove('is-resizing');
+      }
+    });
+    document.addEventListener('touchend', () => {
+      if (isDragging) {
+        isDragging = false;
+        document.body.classList.remove('is-resizing');
+      }
+    });
+
+    // WEB SHARE TARGET HANDLING FOR PWA INTEGRATION
+    function handleIncomingWebShare() {
+      const urlParams = new URLSearchParams(window.location.search);
+      const sharedTitle = urlParams.get('title') || urlParams.get('name') || '';
+      const sharedText = urlParams.get('text') || urlParams.get('description') || '';
+      const sharedUrl = urlParams.get('url') || urlParams.get('link') || '';
+
+      if (sharedTitle || sharedText || sharedUrl) {
+        let extractedUrl = sharedUrl;
+        if (!extractedUrl && sharedText) {
+          const urlMatch = sharedText.match(/https?:\/\/[^\s]+/);
+          if (urlMatch) extractedUrl = urlMatch[0];
+        }
+
+        let type = 'article';
+        let youtubeId = null;
+        if (extractedUrl.includes('youtube.com') || extractedUrl.includes('youtu.be')) {
+          type = 'youtube';
+          youtubeId = extractYouTubeId(extractedUrl);
+        } else if (extractedUrl.includes('linkedin.com')) {
+          type = 'linkedin';
+        }
+
+        const activeWs = getActiveStore();
+        const newQueueItem = {
+          id: Date.now().toString(),
+          section: 'reading',
+          title: sharedTitle || (type === 'youtube' ? 'Shared YouTube Video' : 'Shared Post'),
+          url: extractedUrl,
+          type: type,
+          youtubeId: youtubeId,
+          author: type === 'linkedin' ? 'LinkedIn Share' : (type === 'youtube' ? 'YouTube Share' : 'Shared Link'),
+          excerpt: sharedText || sharedTitle || '',
+          tags: ['Shared', type.toUpperCase()],
+          status: 'queue',
+          pinned: false,
+          embeddable: true,
+          pdfs: []
+        };
+
+        activeWs.items.unshift(newQueueItem);
+        saveState();
+        window.history.replaceState({}, document.title, window.location.pathname);
+        switchMainTab('reading');
+      }
+    }
+
+    // MAIN RENDER ENGINE
+    function renderApp() {
+      applyTheme(store.theme || 'theme-slate');
+      applySidebarRailState();
+
+      // Environment Selector options
+      const selector = document.getElementById('workspaceSelector');
+      selector.innerHTML = Object.keys(store.workspaces).map(k => {
+        const env = store.workspaces[k];
+        return `<option value="${k}" ${k === store.activeWorkspace ? 'selected' : ''}>${env.name || k}</option>`;
+      }).join('');
+
+      document.getElementById('userDisplayName').innerText = store.userName || 'Dev User';
+
+      const activeWs = getActiveStore();
+      const query = document.getElementById('globalSearch').value.toLowerCase().trim();
+
+      // Pinned Bar Renderer
+      const pinnedItems = activeWs.items.filter(i => i.pinned);
+      const pinnedBar = document.getElementById('pinnedBar');
+      
+      if (pinnedItems.length === 0) {
+        pinnedBar.innerHTML = `<span class="text-[11px] app-text-muted italic">No pinned items.</span>`;
+      } else {
+        const VISIBLE_PIN_LIMIT = 4;
+        const visiblePins = pinnedItems.slice(0, VISIBLE_PIN_LIMIT);
+        const overflowPins = pinnedItems.slice(VISIBLE_PIN_LIMIT);
+
+        let html = visiblePins.map(item => `
+          <div class="inline-flex items-center group app-card border app-border rounded transition overflow-hidden flex-shrink-0">
+            <button onclick="${item.section === 'resources' ? `launchInteractiveWorkspace('${item.id}')` : (item.url ? `window.open('${item.url}', '_blank')` : '')}" class="px-2 py-1 text-amber-300 font-medium text-[11px] inline-flex items-center gap-1.5 whitespace-nowrap">
+              <i data-lucide="pin" class="w-3 h-3 text-amber-400 fill-amber-400"></i> ${item.title}
+            </button>
+            <button onclick="togglePin('${item.id}', event)" class="px-1.5 py-1 text-slate-500 hover:text-red-400 border-l app-border transition" title="Unpin Item">
+              <i data-lucide="x" class="w-3 h-3"></i>
+            </button>
+          </div>
+        `).join('');
+
+        if (overflowPins.length > 0) {
+          html += `
+            <div class="relative inline-block flex-shrink-0">
+              <button onclick="togglePinnedDropdown(event)" class="px-2 py-1 app-card text-amber-300 font-bold rounded border app-border transition text-[11px] inline-flex items-center gap-1">
+                <i data-lucide="more-horizontal" class="w-3.5 h-3.5"></i> (+${overflowPins.length})
+              </button>
+              
+              ${pinnedDropdownOpen ? `
+                <div class="absolute left-0 mt-1.5 w-56 app-surface border app-border rounded-xl shadow-2xl py-1.5 z-40 max-h-60 overflow-y-auto custom-scrollbar">
+                  <div class="px-3 py-1 text-[10px] font-bold app-text-muted uppercase tracking-wider border-b app-border mb-1">More Pinned Items</div>
+                  ${overflowPins.map(item => `
+                    <div class="flex items-center justify-between px-3 py-1.5 hover:bg-slate-800/80 text-xs">
+                      <button onclick="pinnedDropdownOpen=false; ${item.section === 'resources' ? `launchInteractiveWorkspace('${item.id}')` : (item.url ? `window.open('${item.url}', '_blank')` : '')}" class="text-amber-300 font-medium truncate text-left flex-1 mr-2 inline-flex items-center gap-1.5">
+                        <i data-lucide="pin" class="w-3 h-3 text-amber-400 fill-amber-400 flex-shrink-0"></i>
+                        <span class="truncate">${item.title}</span>
+                      </button>
+                      <button onclick="togglePin('${item.id}', event)" class="app-text-muted hover:text-red-400 p-0.5" title="Unpin Item">
+                        <i data-lucide="x" class="w-3.5 h-3.5"></i>
+                      </button>
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+            </div>
+          `;
+        }
+        pinnedBar.innerHTML = html;
+      }
+
+      // Recent History Renderer
+      const recentBar = document.getElementById('recentBar');
+      const recentItems = activeWs.recentHistory.map(id => activeWs.items.find(i => i.id === id)).filter(Boolean);
+      if (recentItems.length === 0) {
+        recentBar.innerHTML = `<span class="text-[11px] app-text-muted italic">No recent history.</span>`;
+      } else {
+        recentBar.innerHTML = recentItems.map(item => `
+          <div class="inline-flex items-center group app-card border app-border rounded transition overflow-hidden flex-shrink-0">
+            <button onclick="recordRecentAccess('${item.id}'); ${item.section === 'resources' ? `launchInteractiveWorkspace('${item.id}')` : (item.url ? `window.open('${item.url}', '_blank')` : '')}" class="px-2 py-1 text-cyan-300 font-medium text-[11px] inline-flex items-center gap-1.5 whitespace-nowrap">
+              <i data-lucide="clock" class="w-3 h-3 text-cyan-400"></i> ${item.title}
+            </button>
+            <button onclick="removeRecentItem('${item.id}', event)" class="px-1.5 py-1 text-slate-500 hover:text-red-400 border-l app-border transition" title="Remove from Recent History">
+              <i data-lucide="x" class="w-3 h-3"></i>
+            </button>
+          </div>
+        `).join('');
+      }
+
+      // Counters
+      const queueItems = activeWs.items.filter(i => i.section === 'reading' && i.status === 'queue');
+      const vaultItems = activeWs.items.filter(i => i.section === 'reading' && i.status === 'vault');
+      document.getElementById('count-queue').innerText = queueItems.length;
+      document.getElementById('count-vault').innerText = vaultItems.length;
+
+      // Update Categories Filter Dropdown
+      const categoryFilterSelect = document.getElementById('resourceCategoryFilter');
+      const currentCatVal = categoryFilterSelect.value;
+      const allCategories = ['all', ...activeWs.customCategories];
+      categoryFilterSelect.innerHTML = allCategories.map(c => `<option value="${c}">${c === 'all' ? 'All Categories' : c}</option>`).join('');
+      if (allCategories.includes(currentCatVal)) categoryFilterSelect.value = currentCatVal;
+
+      if (mainTab === 'reading') {
+        const container = document.getElementById('mediaContainer');
+        const activeHeader = document.getElementById('readingActiveGroupHeader');
+        const typeFilterWrapper = document.getElementById('readingTypeFilterWrapper');
+
+        document.getElementById('readingModeListBtn').className = readingDisplayMode === 'list' ? "px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white flex items-center gap-1" : "px-2 py-1 text-xs font-medium rounded transition app-text-muted hover:text-white flex items-center gap-1";
+        document.getElementById('readingModeGroupedBtn').className = readingDisplayMode === 'grouped' ? "px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white flex items-center gap-1" : "px-2 py-1 text-xs font-medium rounded transition app-text-muted hover:text-white flex items-center gap-1";
+
+        if (readingDisplayMode === 'grouped' && !selectedReadingType) {
+          typeFilterWrapper.classList.add('hidden');
+          activeHeader.classList.add('hidden');
+          activeHeader.classList.remove('flex');
+
+          const mediaTypes = [
+            { type: 'youtube', label: 'YouTube Videos', icon: 'video', color: 'text-red-400', bg: 'bg-red-500/10' },
+            { type: 'linkedin', label: 'LinkedIn Posts', icon: 'share-2', color: 'text-blue-400', bg: 'bg-blue-500/10' },
+            { type: 'article', label: 'Articles & Blogs', icon: 'file-text', color: 'text-emerald-400', bg: 'bg-emerald-500/10' }
+          ];
+
+          container.className = "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5";
+          
+          const groupCardsHtml = mediaTypes.map(t => {
+            const itemsInGroup = activeWs.items.filter(i => {
+              if (i.section !== 'reading' || i.status !== readingSubTab || i.type !== t.type) return false;
+              return !query || 
+                (i.title && i.title.toLowerCase().includes(query)) || 
+                (i.excerpt && i.excerpt.toLowerCase().includes(query)) || 
+                (i.tags && i.tags.some(tag => tag.toLowerCase().includes(query)));
+            });
+
+            if (itemsInGroup.length === 0) return '';
+
+            const allTags = Array.from(new Set(itemsInGroup.flatMap(i => i.tags || []))).slice(0, 3);
+
+            return `
+              <div onclick="selectReadingGroupContainer('${t.type}')" class="p-4 sm:p-5 border app-border hover:border-indigo-500/50 app-surface rounded-xl space-y-4 cursor-pointer transition group shadow-sm flex flex-col justify-between">
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <div class="p-2.5 ${t.bg} ${t.color} rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition">
+                        <i data-lucide="${t.icon}" class="w-5 h-5"></i>
+                      </div>
+                      <span class="text-xs app-card border app-border px-2.5 py-0.5 rounded-full font-semibold">
+                        ${itemsInGroup.length} ${itemsInGroup.length === 1 ? 'Item' : 'Items'}
+                      </span>
+                    </div>
+
+                    <button onclick="event.stopPropagation(); openAddModal('reading', '${t.type}')" class="p-1.5 app-card hover:bg-indigo-600 hover:text-white text-indigo-400 rounded-lg border app-border transition" title="Add item into ${t.label}">
+                      <i data-lucide="plus" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+
+                  <div>
+                    <h3 class="font-bold text-base group-hover:text-indigo-400 transition">${t.label}</h3>
+                    <p class="text-xs app-text-muted mt-1 line-clamp-2">Click to view all saved ${t.label.toLowerCase()} in your current queue view.</p>
+                  </div>
+                </div>
+
+                <div class="pt-3 border-t app-border flex items-center justify-between">
+                  <div class="flex flex-wrap gap-1">
+                    ${allTags.length > 0 
+                      ? allTags.map(tag => `<span class="text-[9px] app-card px-1.5 py-0.5 rounded border app-border">#${tag}</span>`).join('')
+                      : '<span class="text-[10px] app-text-muted italic">No items stored</span>'
+                    }
+                  </div>
+                  <span class="text-xs font-semibold text-indigo-400 group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+                    View <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                  </span>
+                </div>
+              </div>
+            `;
+          }).filter(Boolean).join('');
+
+          if (!groupCardsHtml) {
+            container.innerHTML = `<div class="col-span-full text-center py-12 app-surface rounded-xl border border-dashed app-border text-xs app-text-muted">No non-empty groups to display.</div>`;
+          } else {
+            container.innerHTML = groupCardsHtml;
+          }
+
+          lucide.createIcons();
+          return;
+        }
+
+        container.className = "space-y-4";
+        typeFilterWrapper.classList.toggle('hidden', readingDisplayMode === 'grouped');
+
+        let mediaFilter = document.getElementById('mediaFilter').value;
+        if (readingDisplayMode === 'grouped' && selectedReadingType) {
+          mediaFilter = selectedReadingType;
+          const count = activeWs.items.filter(i => i.section === 'reading' && i.status === readingSubTab && i.type === selectedReadingType).length;
+          document.getElementById('readingActiveGroupName').innerText = selectedReadingType.toUpperCase() + ' CONTAINER';
+          document.getElementById('readingActiveGroupMeta').innerText = `${count} ${count === 1 ? 'item' : 'items'} inside container (${readingSubTab === 'queue' ? 'Unread Queue' : 'Vault Archive'})`;
+          activeHeader.classList.remove('hidden');
+          activeHeader.classList.add('flex');
+        } else {
+          activeHeader.classList.add('hidden');
+          activeHeader.classList.remove('flex');
+        }
+
+        const filtered = activeWs.items.filter(i => {
+          if (i.section !== 'reading') return false;
+          const matchSubTab = i.status === readingSubTab;
+          const matchType = mediaFilter === 'all' || i.type === mediaFilter;
+          const matchQuery = !query || 
+            (i.title && i.title.toLowerCase().includes(query)) || 
+            (i.excerpt && i.excerpt.toLowerCase().includes(query)) || 
+            (i.tags && i.tags.some(t => t.toLowerCase().includes(query)));
+          return matchSubTab && matchType && matchQuery;
+        });
+
+        if (filtered.length === 0) {
+          container.innerHTML = `<div class="text-center py-12 app-surface rounded-xl border border-dashed app-border text-xs app-text-muted">No media items match your criteria.</div>`;
+          lucide.createIcons();
+          return;
+        }
+
+        container.innerHTML = filtered.map(item => `
+          <div class="p-4 sm:p-5 border app-border rounded-xl app-surface shadow-sm space-y-3">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-wider">${item.type} • ${item.author}</span>
+                <h3 class="text-base font-bold mt-0.5">${item.title}</h3>
+              </div>
+              <div class="flex items-center gap-1">
+                <button onclick="togglePin('${item.id}')" class="p-1 ${item.pinned ? 'text-amber-400' : 'app-text-muted hover:text-amber-400'}" title="Pin Item">
+                  <i data-lucide="pin" class="w-4 h-4 ${item.pinned ? 'fill-amber-400' : ''}"></i>
+                </button>
+                <button onclick="openAddModal('reading', null, '${item.id}')" class="app-text-muted hover:text-amber-400 p-1"><i data-lucide="pencil" class="w-4 h-4"></i></button>
+                <button onclick="removeItem('${item.id}')" class="app-text-muted hover:text-red-400 p-1"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+              </div>
+            </div>
+
+            ${item.excerpt ? `<p class="text-xs app-text-muted leading-relaxed">${item.excerpt}</p>` : ''}
+
+            <div class="flex flex-wrap gap-1.5">
+              ${item.tags.map(t => `<span class="text-[10px] app-card px-2 py-0.5 rounded border app-border">#${t}</span>`).join('')}
+            </div>
+
+            ${item.type === 'youtube' && item.youtubeId && activeVideoId === item.id ? `
+              <div class="aspect-video w-full rounded-lg overflow-hidden bg-black mt-2">
+                <iframe src="https://www.youtube.com/embed/${item.youtubeId}?autoplay=1" class="w-full h-full border-0" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+              </div>
+            ` : ''}
+
+            ${item.pdfs && item.pdfs.length > 0 ? `
+              <div class="pt-2 border-t app-border space-y-1">
+                <span class="text-[10px] font-semibold app-text-muted uppercase">Attached Documents:</span>
+                ${item.pdfs.map((pdf, idx) => `
+                  <div class="flex items-center justify-between text-xs app-card text-indigo-300 px-2.5 py-1 rounded border app-border">
+                    <a href="${pdf.url}" download="${pdf.name}" class="hover:underline truncate">${pdf.name} (${pdf.size})</a>
+                    <button onclick="deletePdf('${item.id}', ${idx})" class="app-text-muted hover:text-red-400"><i data-lucide="x" class="w-3.5 h-3.5"></i></button>
+                  </div>
+                `).join('')}
+              </div>
+            ` : ''}
+
+            <div class="pt-3 border-t app-border flex flex-wrap items-center justify-between gap-2">
+              <div class="flex items-center gap-2">
+                ${item.url ? `
+                  <a href="${item.url}" target="_blank" onclick="recordRecentAccess('${item.id}')" class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-sm">
+                    <i data-lucide="external-link" class="w-3.5 h-3.5"></i> <span class="hidden sm:inline">Open Link Directly</span><span class="sm:hidden">Open Link</span>
+                  </a>
+                ` : `<span class="text-xs app-text-muted italic">No URL associated</span>`}
+                ${item.type === 'youtube' && item.youtubeId ? `
+                  <button onclick="toggleVideoPlayer('${item.id}')" class="px-3 py-1.5 text-xs font-medium bg-red-950/40 text-red-400 hover:bg-red-900/60 rounded-lg border border-red-800/40">
+                    ${activeVideoId === item.id ? 'Close Player' : 'Watch Inline'}
+                  </button>
+                ` : ''}
+              </div>
+
+              <div class="flex items-center gap-2">
+                <label class="px-3 py-1.5 text-xs font-medium app-card hover:bg-slate-700 rounded-lg cursor-pointer">
+                  <i data-lucide="paperclip" class="w-3.5 h-3.5 inline"></i> <span class="hidden sm:inline">Attach PDF</span>
+                  <input type="file" accept="application/pdf" class="hidden" onchange="handlePdfAttach('${item.id}', event)">
+                </label>
+                <button onclick="toggleVaultStatus('${item.id}')" class="px-3 py-1.5 text-xs font-medium ${item.status === 'vault' ? 'bg-emerald-950/40 text-emerald-400 border border-emerald-800/40' : 'app-card hover:bg-slate-700'} rounded-lg">
+                  ${item.status === 'vault' ? 'In Vault' : 'Archive'}
+                </button>
+              </div>
+            </div>
+          </div>
+        `).join('');
+      } else {
+        const grid = document.getElementById('resourcesGrid');
+        const activeGroupHeader = document.getElementById('activeGroupHeader');
+        const categoryFilterWrapper = document.getElementById('categoryFilterWrapper');
+
+        document.getElementById('viewModeGridBtn').className = resourceDisplayMode === 'grid' ? "px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white flex items-center gap-1" : "px-2 py-1 text-xs font-medium rounded transition app-text-muted hover:text-white flex items-center gap-1";
+        document.getElementById('viewModeGroupedBtn').className = resourceDisplayMode === 'grouped' ? "px-2 py-1 text-xs font-medium rounded transition bg-indigo-600 text-white flex items-center gap-1" : "px-2 py-1 text-xs font-medium rounded transition app-text-muted hover:text-white flex items-center gap-1";
+
+        if (resourceDisplayMode === 'grouped' && !selectedGroupCategory) {
+          // Hide category dropdown ONLY while in top-level Grouped view
+          categoryFilterWrapper.classList.add('hidden');
+          activeGroupHeader.classList.add('hidden');
+          activeGroupHeader.classList.remove('flex');
+
+          const categoryCardsHtml = activeWs.customCategories.map(cat => {
+            const catTools = activeWs.items.filter(i => {
+              if (i.section !== 'resources' || i.type !== cat) return false;
+              return !query || 
+                (i.title && i.title.toLowerCase().includes(query)) || 
+                (i.excerpt && i.excerpt.toLowerCase().includes(query)) || 
+                (i.tags && i.tags.some(t => t.toLowerCase().includes(query)));
+            });
+
+            if (catTools.length === 0) return '';
+
+            const allTags = Array.from(new Set(catTools.flatMap(i => i.tags || []))).slice(0, 3);
+
+            return `
+              <div onclick="selectGroupContainer('${cat}')" class="p-4 sm:p-5 border app-border hover:border-indigo-500/50 app-surface rounded-xl space-y-4 cursor-pointer transition group shadow-sm flex flex-col justify-between">
+                <div class="space-y-3">
+                  <div class="flex items-center justify-between">
+                    <div class="flex items-center gap-2">
+                      <div class="p-2.5 bg-indigo-600/10 group-hover:bg-indigo-600 text-indigo-400 group-hover:text-white rounded-xl transition">
+                        <i data-lucide="folder" class="w-5 h-5"></i>
+                      </div>
+                      <span class="text-xs app-card border app-border px-2.5 py-0.5 rounded-full font-semibold">
+                        ${catTools.length} ${catTools.length === 1 ? 'Tool' : 'Tools'}
+                      </span>
+                    </div>
+
+                    <button onclick="event.stopPropagation(); openAddModal('resources', '${cat}')" class="p-1.5 app-card hover:bg-indigo-600 hover:text-white text-indigo-400 rounded-lg border app-border transition" title="Add tool into ${cat}">
+                      <i data-lucide="plus" class="w-4 h-4"></i>
+                    </button>
+                  </div>
+
+                  <div>
+                    <h3 class="font-bold text-base group-hover:text-indigo-400 transition">${cat}</h3>
+                    <p class="text-xs app-text-muted mt-1 line-clamp-2">Click to open this category container and display assigned tools.</p>
+                  </div>
+                </div>
+
+                <div class="pt-3 border-t app-border flex items-center justify-between">
+                  <div class="flex flex-wrap gap-1">
+                    ${allTags.length > 0 
+                      ? allTags.map(t => `<span class="text-[9px] app-card px-1.5 py-0.5 rounded border app-border">#${t}</span>`).join('')
+                      : '<span class="text-[10px] app-text-muted italic">No tools added yet</span>'
+                    }
+                  </div>
+                  <span class="text-xs font-semibold text-indigo-400 group-hover:translate-x-1 transition-transform inline-flex items-center gap-1">
+                    View <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                  </span>
+                </div>
+              </div>
+            `;
+          }).filter(Boolean).join('');
+
+          if (!categoryCardsHtml) {
+            grid.innerHTML = `<div class="col-span-full text-center py-12 app-surface rounded-xl border border-dashed app-border text-xs app-text-muted">No non-empty category containers found.</div>`;
+          } else {
+            grid.innerHTML = categoryCardsHtml;
+          }
+
+          lucide.createIcons();
+          return;
+        }
+
+        // Show category dropdown in Grid View
+        categoryFilterWrapper.classList.remove('hidden');
+
+        let categoryFilter = document.getElementById('resourceCategoryFilter').value;
+        if (resourceDisplayMode === 'grouped' && selectedGroupCategory) {
+          categoryFilter = selectedGroupCategory;
+          categoryFilterWrapper.classList.add('hidden');
+          
+          const categoryToolsCount = activeWs.items.filter(i => i.section === 'resources' && i.type === selectedGroupCategory).length;
+          document.getElementById('activeGroupName').innerText = selectedGroupCategory;
+          document.getElementById('activeGroupMeta').innerText = `${categoryToolsCount} ${categoryToolsCount === 1 ? 'Tool' : 'Tools'} inside container`;
+          activeGroupHeader.classList.remove('hidden');
+          activeGroupHeader.classList.add('flex');
+        } else {
+          activeGroupHeader.classList.add('hidden');
+          activeGroupHeader.classList.remove('flex');
+        }
+
+        const filteredResources = activeWs.items.filter(i => {
+          if (i.section !== 'resources') return false;
+          const matchCat = categoryFilter === 'all' || i.type === categoryFilter;
+          const matchQuery = !query || 
+            (i.title && i.title.toLowerCase().includes(query)) || 
+            (i.excerpt && i.excerpt.toLowerCase().includes(query)) || 
+            (i.tags && i.tags.some(t => t.toLowerCase().includes(query)));
+          return matchCat && matchQuery;
+        });
+
+        if (filteredResources.length === 0) {
+          grid.innerHTML = `<div class="col-span-full text-center py-12 app-surface rounded-xl border border-dashed app-border text-xs app-text-muted">No developer tools found in this view.</div>`;
+          lucide.createIcons();
+          return;
+        }
+
+        grid.innerHTML = filteredResources.map(item => `
+          <div class="p-4 sm:p-5 border app-border app-surface rounded-xl space-y-4 flex flex-col justify-between">
+            <div class="space-y-2">
+              <div class="flex items-start justify-between gap-2">
+                <span class="text-[10px] font-bold text-cyan-400 uppercase tracking-wider">${item.type}</span>
+                <div class="flex items-center gap-1.5">
+                  <button onclick="togglePin('${item.id}')" class="p-0.5 ${item.pinned ? 'text-amber-400' : 'app-text-muted hover:text-amber-400'}" title="${item.pinned ? 'Unpin from Top Bar' : 'Pin to Top Bar'}">
+                    <i data-lucide="pin" class="w-4 h-4 ${item.pinned ? 'fill-amber-400 text-amber-400' : ''}"></i>
+                  </button>
+                  <button onclick="openAddModal('resources', null, '${item.id}')" class="app-text-muted hover:text-amber-400 p-0.5"><i data-lucide="pencil" class="w-3.5 h-3.5"></i></button>
+                  <button onclick="removeItem('${item.id}')" class="app-text-muted hover:text-red-400 p-0.5"><i data-lucide="trash-2" class="w-3.5 h-3.5"></i></button>
+                </div>
+              </div>
+              <h3 class="font-bold text-sm leading-snug">${item.title}</h3>
+              <p class="text-xs app-text-muted leading-relaxed">${item.excerpt}</p>
+            </div>
+
+            <div class="space-y-3 pt-3 border-t app-border">
+              <div class="flex flex-wrap gap-1">
+                ${item.tags.map(t => `<span class="text-[9px] app-card px-1.5 py-0.5 rounded border app-border">#${t}</span>`).join('')}
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button onclick="launchInteractiveWorkspace('${item.id}')" class="flex-1 flex items-center justify-center gap-1.5 bg-indigo-600 hover:bg-indigo-500 text-white py-1.5 rounded-lg text-xs font-semibold shadow-md transition">
+                  <i data-lucide="columns" class="w-3.5 h-3.5"></i> Launch Panel
+                </button>
+                ${item.url ? `
+                  <a href="${item.url}" target="_blank" onclick="recordRecentAccess('${item.id}')" class="p-1.5 app-card hover:bg-slate-700 rounded-lg border app-border" title="Open Link Directly">
+                    <i data-lucide="external-link" class="w-4 h-4"></i>
+                  </a>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+        `).join('');
+      }
+
+      lucide.createIcons();
+    }
+
+    handleIncomingWebShare();
+    loadFirebaseSettingsIntoForm();
+    initializeFirebase(getActiveFirebaseConfig()).catch(console.error);
+    renderApp();
+  </script>
+</body>
+</html>
